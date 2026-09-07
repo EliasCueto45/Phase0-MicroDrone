@@ -1,0 +1,34 @@
+{
+  "labels": [
+    {
+      "name": "good first issue",
+      "color": "7057ff",
+      "description": "Marks beginner‑friendly tasks."
+    },
+    {
+      "name": "starter task",
+      "color": "c2e0c6",
+      "description": "Indicates onboarding tasks."
+    },
+    {
+      "name": "documentation",
+      "color": "0075ca",
+      "description": "For README, module docs, etc."
+    },
+    {
+      "name": "phase:0",
+      "color": "5319e7",
+      "description": "Marks all Phase‑0 issues."
+    },
+    {
+      "name": "difficulty:easy",
+      "color": "bfdadc",
+      "description": "Helps students filter by difficulty."
+    },
+    {
+      "name": "difficulty:medium",
+      "color": "f9d0c4",
+      "description": "For slightly deeper tasks."
+    }
+  ]
+}
