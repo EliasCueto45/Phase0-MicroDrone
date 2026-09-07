@@ -5,6 +5,9 @@
 
 ![CONTEXTUAL·AI SYSTEMS Logo](https://raw.githubusercontent.com/contextualai-systems/Phase0-MicroDrone/refs/heads/main/assets/banner/ContextualAI%20logo.png)
 
+![Phase‑0 QR Code](https://raw.githubusercontent.com/contextualai-systems/Phase0-MicroDrone/refs/heads/main/assets/qr/QR%20Code%20ContextualAI%20Systems.png)
+
+
 A roof‑mounted autonomous micro‑drone designed to detect wildlife, classify species, execute safe deterrence behaviors, and return to its dock using contextual AI, multi‑axis motion, and strict safety layers.
 
 ---
