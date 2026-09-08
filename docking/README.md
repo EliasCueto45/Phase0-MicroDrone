@@ -1,38 +1,38 @@
 # Docking Module — Phase‑0 MicroDrone
 
-The Docking module handles autonomous docking, alignment, 
-and charging logic for the roof‑mounted docking station.
+## Purpose
+The Docking module defines how the drone aligns with and returns to its dock.  
+Phase‑0 focuses on **alignment logic**, **docking states**, and **event logging** — no real hardware yet.
 
-## What This Module Does
-- Detects docking station alignment
-- Controls approach + descent
-- Manages charging contact logic
-- Interfaces with motion engine for fine adjustments
+## Responsibilities (Phase‑0)
+- Provide docking state machine
+- Provide alignment stub logic
+- Log docking events
+- Output docking status to Navigation + Safety
 
-## How to Run
-```bash
-python docking/run_docking.py
-File Structure
-alignment/ — visual + sensor alignment logic
+## Inputs
+- State vector (from Navigation)
+- Detection stub (from CV)
+- Safety constraints (from Safety Layer)
 
-approach/ — descent + positioning
+## Outputs
+- Docking state updates
+- Docking logs
 
-charging/ — contact detection + state machine
+## File Structure
+- `run_docking.py` — main entry point
+- `states/` — docking state machine
+- `alignment/` — alignment stub logic
+- `utils/` — logging helpers
 
-utils/ — geometry + smoothing
+## Good First Issues
+- Add docking state structure
+- Add alignment stub logic
+- Add docking event logging
 
-Good First Issues
-Add alignment visualization
+## Future Phases
+- Real docking pad hardware (Phase‑1)
+- Vision‑based alignment (Phase‑2)
+- Autonomous docking + charging (Phase‑3)
 
-Improve descent stability
 
-Add charging‑state logging
-
-Add mock docking station for simulation
-
-Contributing
-Document alignment assumptions
-
-Test docking in simulation before merging
-
-Add diagrams for approach logic
