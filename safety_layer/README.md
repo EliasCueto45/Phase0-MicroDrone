@@ -1,40 +1,37 @@
+
 # Safety Layer Module — Phase‑0 MicroDrone
 
-The Safety Layer ensures all drone actions are safe. 
-It prevents collisions, enforces no‑launch zones, and 
-handles interior mode logic.
+## Purpose
+The Safety Layer enforces constraints that prevent unsafe behavior.  
+In Phase‑0, this module provides **safety stubs**, **battery checks**, and **emergency stop logic**.
 
-## What This Module Does
-- Human detection + proximity rules
-- No‑launch zone enforcement
-- Interior mode logic (cart detection)
-- Failsafe triggers (stop, hover, return)
+## Responsibilities (Phase‑0)
+- Provide battery check stub
+- Provide emergency stop stub
+- Enforce basic safety constraints
+- Log safety events
 
-## How to Run
-```bash
-python safety_layer/run_safety.py
+## Inputs
+- State vector (from Navigation)
+- Motor command stub (from Motion Engine)
+- Detection stub (from CV)
 
-File Structure
-rules/ — safety rules + thresholds
+## Outputs
+- Safety‑validated motor command stub
+- Safety logs
 
-detectors/ — human + interior detection
+## File Structure
+- `run_safety.py` — main entry point
+- `checks/` — battery + emergency stop stubs
+- `constraints/` — safety rules
+- `utils/` — logging helpers
 
-failsafes/ — emergency behaviors
+## Good First Issues
+- Add battery check stub
+- Add emergency stop stub
+- Add safety event logging
 
-utils/ — geometry + distance helpers
-
-Good First Issues
-Add a new safety rule
-
-Improve human‑distance thresholding
-
-Add interior‑mode test cases
-
-Add logging for rule violations
-
-Contributing
-Keep rules transparent and documented
-
-Add unit tests for each rule
-
-Validate changes in simulation
+## Future Phases
+- Real battery telemetry (Phase‑1)
+- Obstacle‑avoidance safety (Phase‑2)
+- Full safety override system (Phase‑3)
