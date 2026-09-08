@@ -29,6 +29,7 @@ Phase‑0 focuses on **alignment logic**, **docking states**, and **event loggin
 - Add docking state structure
 - Add alignment stub logic
 - Add docking event logging
+- 
 
 ## Future Phases
 - Real docking pad hardware (Phase‑1)
