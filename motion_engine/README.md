@@ -1,40 +1,38 @@
 # Motion Engine Module — Phase‑0 MicroDrone
 
-The Motion Engine executes all drone movement behaviors. 
-It converts high‑level commands (rise, tilt, rotate) into safe, 
-bounded motion primitives.
+## Purpose
+The Motion Engine module defines how the drone *would* move — without actually controlling hardware in Phase‑0.  
+This semester focuses on **motor command stubs**, **PID structure**, and **test harnesses**.
 
-## What This Module Does
-- Implements rise/tilt/rotate primitives
-- Provides interior micro‑motion behaviors
-- Enforces safety constraints from the Safety Layer
-- Interfaces with the simulation controller
+## Responsibilities (Phase‑0)
+- Provide motor command stubs (no real ESC output)
+- Define PID controller structure
+- Log motor commands for debugging
+- Provide a test harness for simulated movement
 
-## How to Run
-```bash
-python motion_engine/run_motion.py
+## Inputs
+- Desired motion command (from Navigation)
+- State vector (from Navigation)
+- Safety constraints (from Safety Layer)
 
-File Structure
-run_motion.py — main entry point
+## Outputs
+- Motor command stub (placeholder values)
+- Logged motor activity
 
-primitives/ — rise, tilt, rotate, hover
+## File Structure
+- `run_motion.py` — main entry point
+- `pid/` — PID controller structure
+- `commands/` — motor command stubs
+- `utils/` — logging + test harness
 
-controllers/ — PID or rule‑based control
+## Good First Issues
+- Add PID parameter placeholders
+- Create a motor command logging function
+- Add a simple test harness for simulated movement
 
-utils/ — math helpers, smoothing
+## Future Phases
+- Real ESC control (Phase‑1)
+- Multi‑axis stabilization (Phase‑2)
+- Full motion control loop (Phase‑3)
 
-Good First Issues
-Add a new motion primitive
 
-Improve rotation stability
-
-Add smoothing to tilt behavior
-
-Add logging for motion commands
-
-Contributing
-Keep primitives modular
-
-Add diagrams for new behaviors
-
-Test in simulation before merging
