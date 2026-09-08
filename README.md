@@ -7,6 +7,15 @@
 
 ![Phase‑0 QR Code](https://raw.githubusercontent.com/contextualai-systems/Phase0-MicroDrone/refs/heads/main/assets/qr/QR%20Code%20ContextualAI%20Systems.png)
 
+---
+
+## 📄 RCOS Recruitment Deck (Fall 2026)
+View the full pitch deck used during the RCOS kickoff session:
+
+[RPI Recruitment Follow-Up Presentation (PDF)](assets/presentations/RPI_Recruitment_Follow_Up_Presentation.pdf)
+
+---
+
 
 A roof‑mounted autonomous micro‑drone designed to detect wildlife, classify species, execute safe deterrence behaviors, and return to its dock using contextual AI, multi‑axis motion, and strict safety layers.
 
