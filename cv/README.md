@@ -1,33 +1,41 @@
-# CV Module — Phase‑0 MicroDrone
+# Computer Vision Module — Phase‑0 MicroDrone
 
-The CV module handles all computer vision tasks for the Phase‑0 MicroDrone. 
-This includes object detection, species classification, approach‑angle estimation, 
-and interior‑cart detection.
+## Purpose
+The CV module handles all computer‑vision tasks for Phase‑0.  
+In this semester, the focus is on synthetic camera input, preprocessing, and logging — not real hardware.
 
-## What This Module Does
-- Reads frames from the front CSI camera (or simulation feed)
-- Runs object detection (birds, carts, humans)
-- Computes bounding boxes + confidence scores
-- Logs frames for debugging
-- Sends detection results to the Decision Layer
+## Responsibilities (Phase‑0)
+- Provide a synthetic camera frame source (static image or test pattern)
+- Apply basic preprocessing (resize, grayscale, normalization)
+- Log frames for debugging
+- Output a simple “detection stub” to feed the autonomy pipeline
 
-## How to Run
-```bash
-python cv/run_cv.py
+## Inputs
+- Synthetic camera frame (generated internally)
+- Optional test images from assets/
+
+## Outputs
+- Preprocessed frame
+- Detection stub (placeholder bounding box + label)
+- Frame logs for debugging
 
 ## File Structure
-- `run_cv.py` — main entry point
-- `pipeline/` — preprocessing, filtering, transforms
-- `detectors/` — species + object detection models
-- `utils/` — logging, frame helpers
+- run_cv.py — main entry point for CV
+- pipeline/ — preprocessing steps
+- detectors/ — placeholder detection logic
+- utils/ — logging helpers
 
 ## Good First Issues
-- Add a new OpenCV filter
-- Improve bounding box stability
+- Add a new preprocessing filter
+- Improve bounding box stability in the stub
 - Add frame logging
 - Add mock camera input for simulation
 
-## Contributing
-- Keep functions small and testable
-- Document new detectors
-- Add sample images for debugging
+  ## Future Phases
+- Real CSI camera input (Phase‑1)
+- Species classification (Phase‑2)
+- Approach‑angle estimation (Phase‑2)
+- Full object detection pipeline (Phase‑3)
+
+
+
