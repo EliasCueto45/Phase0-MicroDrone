@@ -1,39 +1,32 @@
-# Docking Module — Phase‑0 MicroDrone
+# Docking — Phase 0
+
+[Central proposal](../README.md)
 
 ## Purpose
-The Docking module defines how the drone aligns with and returns to its dock.  
-Phase‑0 focuses on **alignment logic**, **docking states**, and **event logging** — no real hardware yet.
 
-## Responsibilities (Phase‑0)
-- Provide docking state machine
-- Provide alignment stub logic
-- Log docking events
-- Output docking status to Navigation + Safety
+Return to and land on a stationary marked pad in simulation. “Docking” means landing within an agreed tolerance; charging, magnetic contact, and moving-platform landing are outside the required demonstration.
 
-## Inputs
-- State vector (from Navigation)
-- Detection stub (from CV)
-- Safety constraints (from Safety Layer)
+Motion/navigation owns the docking sequence, CV owns marker observations, and simulation owns the pad and evaluation scenario.
 
-## Outputs
-- Docking state updates
-- Docking logs
+## Inputs and outputs
 
-## File Structure
-- `run_docking.py` — main entry point
-- `states/` — docking state machine
-- `alignment/` — alignment stub logic
-- `utils/` — logging helpers
+- Inputs: estimated vehicle state, timestamped marker-relative pose, known pad configuration, safety constraints.
+- Outputs: alignment/descent targets through motion and safety, docking state, completion/failure status, and logs.
+- Define conversions from camera-relative observations into the command frame before integration.
 
-## Good First Issues
-- Add docking state structure
-- Add alignment stub logic
-- Add docking event logging
-- 
+## First tasks
 
-## Future Phases
-- Real docking pad hardware (Phase‑1)
-- Vision‑based alignment (Phase‑2)
-- Autonomous docking + charging (Phase‑3)
+1. Define approach, search, align, descend, complete, and abort transitions.
+2. Return to a known pad vicinity using navigation.
+3. Use marker observations for final alignment.
+4. Define limits, alignment tolerance, detection freshness, and descent conditions.
+5. Handle marker loss and aborts with safety.
+6. Measure landing position error over repeated trials.
 
+Ensure the simulated camera can see the marker during the intended sequence. Distinguish navigating to known pad coordinates from demonstrating visual alignment.
 
+## Acceptance evidence
+
+The drone approaches, aligns, and lands within the agreed tolerance. Logs show observations and transition reasons. Tests include lost/stale markers and low-battery behavior. A land command alone does not count as confirmed landing; define completion using vehicle status and evaluation data.
+
+Implementation files and run commands have not yet been created.
