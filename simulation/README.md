@@ -1,6 +1,6 @@
 # Simulation and Integration — Phase 0
 
-[Central proposal](../README.md)
+[Central proposal](../START_HERE.md)
 
 ## Purpose
 
