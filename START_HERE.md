@@ -4,22 +4,22 @@
 
 Phase 0 builds an open-source simulation and reusable robotics foundation for a future microdrone platform. The broader product concept is a drone that operates from a golf cart dock; this semester focuses on software and simulation, with no physical flight or hardware integration.
 
-**Semester demonstration:** a simulated drone takes off, follows waypoints, finds a dock marker, and returns to a stationary landing pad, with flight logs and tested safety overrides.
+**Semester demonstration:** a simulated drone takes off, follows waypoints, returns to a stationary landing pad, with flight logs and tested safety overrides.
 
-This guide is the central working outline for the RCOS team. The [project README](README.md) preserves the original project overview. It describes proposed work, not completed functionality. The repository currently contains documentation and placeholder files; a reproducible runtime and dependency setup still need to be established.
+This guide defines the authoritative Phase 0 scope for the RCOS team. It describes proposed work, not completed functionality. The repository currently contains documentation and placeholder files; a reproducible runtime and dependency setup still need to be established.
 
-## Scope and development boundary
+## Phase 0 scope
 
-| RCOS public work | Outside the required RCOS scope |
+| Workstream | Required work |
 | --- | --- |
-| Simulation worlds, existing vehicle models, simulated sensors | Physical drone construction and firmware integration (MDL) |
-| Camera input, preprocessing, marker detection, pose estimation | Proprietary species models and species-specific training |
-| Generic navigation, movement commands, state logging | Deterrence selection, escalation, and anti-habituation policies |
-| Safety constraints, docking alignment, test fixtures | Proprietary mission decisions and sensor-fusion heuristics |
+| Simulation | Worlds, existing vehicle models, simulated sensors, and repeatable fixtures |
+| CV | Synthetic frames, preprocessing, logging, and a simple detection stub |
+| Motion and navigation | Generic movement commands, waypoint logic, and state logging |
+| Safety and docking | Constraints, state transitions, and alignment tests using explicit synthetic inputs |
 
-The public demonstration and tests must run using public dependencies, synthetic inputs, and nonproprietary test logic. They must not require private ContextualAI modules.
+The demonstration and tests use public dependencies, synthetic inputs, and documented test logic. Physical construction and hardware integration are outside Phase 0.
 
-**Bird detection is an open scope question:** generic bird detection using a public pretrained model may fit basic object detection, but this needs an explicit boundary decision before becoming a committed task. Model and dataset licenses must also be checked. Species classification and training are not semester requirements. Marker detection gives CV a useful integration target immediately.
+**CV completion does not require a working detector.** 2D marker detection is a stretch goal. Pose estimation belongs in Phase 1; further work will be scoped separately.
 
 The [Student Engineering Packet V3](docs/STUDENT%20ENGINEERING%20PACKET%20V3.pdf) describes a broader system and contains conflicting publication, ownership, hardware, and student-deliverable requirements. Use this working proposal for semester planning; the project stakeholders still need to reconcile those requirements. This guide does not resolve ownership or licensing agreements. The repository includes an [MIT license](LICENSE.md); third-party dependencies and assets retain their own licenses.
 
@@ -30,8 +30,7 @@ The [Student Engineering Packet V3](docs/STUDENT%20ENGINEERING%20PACKET%20V3.pdf
 | Gazebo | World, vehicle physics, and simulated camera/sensor data |
 | PX4 SITL (software in the loop) | Autopilot running on a development computer |
 | ROS 2 | Communication between perception, navigation, and PX4 |
-| Python + OpenCV | Application logic, image processing, and marker detection |
-| PyTorch, optional | Only if an approved model requires it |
+| Python + OpenCV | Application logic, preprocessing, and synthetic detection output |
 
 The candidate environment is Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic, and a pinned compatible PX4 release. Validate this combination on a reference machine and record exact versions before onboarding everyone. It is not yet a tested repository setup.
 
@@ -44,9 +43,9 @@ See the [simulation guide](simulation/README.md) for setup acceptance criteria a
 The intended data flow is:
 
 1. Gazebo supplies simulated sensor data; PX4 supplies estimated vehicle state.
-2. CV publishes timestamped marker observations.
+2. CV publishes timestamped synthetic detection-stub observations; it does not choose actions.
 3. Navigation manages the mission and requests docking when appropriate.
-4. Docking produces alignment/descent targets from vehicle state and marker observations.
+4. Docking produces alignment/descent targets from vehicle state and documented synthetic pad/alignment fixtures. CV stub boxes are not 3D position measurements.
 5. Safety validates or overrides requested actions.
 6. Motion sends permitted targets to PX4; telemetry feeds back into the system.
 
@@ -57,7 +56,7 @@ Before implementation, agree on these contracts:
 | Interface | Minimum information |
 | --- | --- |
 | Vehicle state | Timestamp, position, velocity, orientation, coordinate frame, flight mode, validity |
-| Vision observation | Timestamp, marker/object ID, image coordinates, optional relative pose, frame, validity |
+| Vision observation | Timestamp, camera ID, image dimensions, stub label/bounding box, validity, synthetic-source flag |
 | Motion request | Position or velocity target, yaw, frame, limits, expiration |
 | Safety decision | Allowed action or override, reason, timestamp |
 | Mission/docking status | Current state, transition reason, completion or failure |
@@ -68,11 +67,11 @@ Specify units and coordinate conversions explicitly, including camera frames and
 
 | Workstream | Responsibilities | First deliverable |
 | --- | --- | --- |
-| Computer Vision | Camera inputs, marker detection, relative pose, observation logs | Repeatable marker detection on saved images/video |
+| Computer Vision | Synthetic frames, preprocessing, detection stub, observation logs | Repeatable timestamped stub output, including empty/invalid cases |
 | Motion and Navigation | PX4 telemetry, bounded commands, waypoint mission, docking execution | Scripted takeoff, hold, and landing with logs and an abort path |
 | Simulation and integration | Shared environment, sensors, landing pad, reproducible launch | A second member reproduces the stock simulation and reads telemetry/camera data |
 
-Safety and docking are shared integration responsibilities. Motion/navigation leads command enforcement and docking states; CV supplies marker observations; simulation supplies scenarios and injected failures. Assign an issue owner for each deliverable.
+Safety and docking are shared integration responsibilities. Motion/navigation leads command enforcement and docking states; CV only publishes observations for other modules to consume; simulation supplies scenarios and injected failures. Assign an issue owner for each deliverable.
 
 Simulation starts immediately, but does not block offline CV, interface design, or mission-state tests using fake telemetry.
 
@@ -80,21 +79,21 @@ Simulation starts immediately, but does not block offline CV, interface design, 
 
 | Month | Required outcome |
 | --- | --- |
-| September | Agree scope/interfaces; reproduce stock simulation; read telemetry and camera frames; detect markers offline; demonstrate basic flight and abort handling |
-| October | Execute waypoints; detect the marker in simulation; integrate observations; enforce command limits and geofence behavior |
-| November | Return to the stationary pad, align, and descend; test marker loss, stale telemetry, command loss, and simulated low battery |
+| September | Agree scope/interfaces; reproduce stock simulation; read telemetry and camera frames; publish synthetic detection observations; demonstrate basic flight and abort handling |
+| October | Execute waypoints; integrate timestamped stub observations; enforce command limits and geofence behavior |
+| November | Return to the stationary pad, align, and descend; test missing synthetic inputs, stale telemetry, command loss, and simulated low battery |
 | December | Repeat end-to-end demonstrations; report landing error and success rate; document setup, limitations, and handoff |
 
-For this semester, **docking means landing within an agreed tolerance on a stationary marked pad**. It does not include charging, magnetic engagement, or landing on a moving cart.
+For this semester, **docking means landing within an agreed tolerance on a stationary pad using documented synthetic alignment inputs**. It does not include charging, magnetic engagement, or landing on a moving cart.
 
-Stretch work: approved generic bird detection, multiple-object tracking, detailed cart scenery, and moving-dock abort scenarios. Species-adaptive deterrence remains outside the public milestone plan.
+Stretch work: 2D marker detection. It is not required for the integrated demonstration, which must remain runnable with synthetic fixtures.
 
 ## Definition of done
 
 - Another member can reproduce the documented environment and demonstration.
 - The mission completes takeoff, waypoints, return, alignment, and landing.
 - Logs capture estimated state, requested commands, observations, and safety/state transitions.
-- Marker loss, stale data, command loss, geofence violations, and low-battery scenarios have defined, tested outcomes.
+- Missing synthetic inputs, stale data, command loss, geofence violations, and low-battery scenarios have defined, tested outcomes.
 - Landing tolerance, timeouts, command limits, trial count, and success criteria are agreed before final testing; results include failures.
 - Simulation results are reported as simulation evidence, not real-world safety validation.
 

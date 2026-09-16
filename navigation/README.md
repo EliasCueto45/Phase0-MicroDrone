@@ -1,10 +1,10 @@
 # Navigation — Phase 0
 
-[Central proposal](../START_HERE.md)
+[Phase 0 scope: Start Here](../START_HERE.md)
 
 ## Purpose
 
-Maintain the application's view of vehicle state and manage a simple waypoint mission with return-to-pad behavior. Use PX4 estimated state initially; custom dead reckoning and proprietary sensor-fusion heuristics are not required.
+Maintain the application's view of vehicle state and manage a simple waypoint mission with return-to-pad behavior. Use PX4 estimated state initially; custom state estimation is not required.
 
 ## Inputs and outputs
 

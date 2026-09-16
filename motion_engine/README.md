@@ -1,6 +1,6 @@
 # Motion Engine — Phase 0
 
-[Central proposal](../START_HERE.md)
+[Phase 0 scope: Start Here](../START_HERE.md)
 
 ## Purpose
 

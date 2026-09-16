@@ -1,35 +1,38 @@
 # Computer Vision — Phase 0
 
-[Central proposal](../START_HERE.md)
+[Phase 0 scope: Start Here](../START_HERE.md)
 
 ## Purpose and scope
 
-Provide camera processing and marker observations for simulated docking. Start with saved images/video so development can proceed before Gazebo is ready.
+Produce timestamped observations for other modules to consume. Phase 0 is limited to synthetic frames, preprocessing, logging, and a simple detection stub, so work can proceed before Gazebo is ready.
 
-Required work: frame input, preprocessing, ArUco marker detection, marker-relative pose estimation, and logging. Generic bird detection is a possible stretch task pending the scope decision in the central proposal. Species training, threat interpretation, and deterrence selection are outside this team's required work.
+CV owns observation production only. Navigation owns mission logic, docking owns alignment and descent logic, and safety owns permission and override decisions. CV does not select actions or issue movement commands.
 
 ## Inputs and outputs
 
-- Inputs: saved or simulated camera frames, timestamps, camera calibration, known marker dimensions.
-- Outputs: marker ID, image corners, optional relative pose, coordinate frame, timestamp, and validity.
-- Publish an explicit missing/invalid observation when detection fails. Do not reuse an old pose as though it were current.
-- Pose estimation requires camera intrinsics and marker dimensions; a bounding box alone is not a 3D position.
+- Inputs: generated test frames or saved synthetic fixtures, timestamps, and camera identity.
+- Outputs: timestamp, camera ID, image dimensions, placeholder label/bounding box in documented pixel coordinates, and validity.
+- Label stub output as synthetic. Include explicit empty/invalid cases and never present an old observation as current.
+- A stub bounding box is not a measured 3D position and must not be used as one.
 
 ## First tasks
 
-1. Define a frame-source interface for files and future simulated cameras.
-2. Detect and annotate markers in a small repeatable image/video fixture set.
-3. Agree the observation format with navigation and docking.
-4. Add calibrated pose estimation and document camera-frame conventions.
-5. Connect the pipeline to Gazebo frames.
-6. Evaluate distance, viewing angle, lighting, occlusion, and marker loss.
+1. Create a repeatable synthetic frame source.
+2. Add simple preprocessing with documented input/output formats.
+3. Produce deterministic detection-stub observations, including empty and invalid cases.
+4. Log frames and observations with timestamps and camera identity.
+5. Agree the observation format with consuming modules and demonstrate publication using fixtures.
 
-Choose camera placement with docking in mind: the marker must remain visible during the planned approach and descent.
+Keep forward-camera and downward-camera observations distinguishable through camera IDs. Other modules decide how to use these observations.
 
 ## Acceptance evidence
 
-The first demo reads saved inputs and logs timestamped results, including no-marker cases. Integration then demonstrates observations from the simulated camera. Report detection rate and pose error where reference data is available; document the evaluated conditions.
+The required demo generates or reads synthetic frames, preprocesses them, and publishes/logs timestamped stub observations. Verify output formats, reproducibility, and empty/invalid cases. Consumers can test their interfaces without a working detector.
 
-OpenCV is the initial tool. PyTorch is optional, not required for marker detection. See the [OpenCV ArUco tutorial](https://docs.opencv.org/4.13.0/d5/dae/tutorial_aruco_detection.html).
+## Stretch and future work
 
-Implementation files and run commands have not yet been created.
+2D marker detection is a stretch goal, not a dependency for Phase 0 completion. It may publish marker IDs and image corners through the observation interface. See the [OpenCV ArUco tutorial](https://docs.opencv.org/4.13.0/d5/dae/tutorial_aruco_detection.html).
+
+Python and OpenCV are sufficient for the required Phase 0 pipeline; model training is not required.
+
+

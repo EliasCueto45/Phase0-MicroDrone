@@ -17,7 +17,9 @@ View the full pitch deck used during the RCOS kickoff session:
 ---
 
 
-A roof‑mounted autonomous micro‑drone designed to detect wildlife, classify species, execute safe deterrence behaviors, and return to its dock using contextual AI, multi‑axis motion, and strict safety layers.
+An open-source software and simulation foundation for a future roof-mounted microdrone. Phase 0 focuses on synthetic camera frames, preprocessing, observation stubs, logging, and basic simulated movement and docking interfaces.
+
+[START_HERE.md](START_HERE.md) defines the authoritative semester scope. The engineering packet and recruitment materials below provide historical project context, not additional Phase 0 requirements.
 
 ---
 
