@@ -1,38 +1,32 @@
-# Motion Engine Module — Phase‑0 MicroDrone
+# Motion Engine — Phase 0
+
+[Phase 0 scope: Start Here](../START_HERE.md)
 
 ## Purpose
-The Motion Engine module defines how the drone *would* move — without actually controlling hardware in Phase‑0.  
-This semester focuses on **motor command stubs**, **PID structure**, and **test harnesses**.
 
-## Responsibilities (Phase‑0)
-- Provide motor command stubs (no real ESC output)
-- Define PID controller structure
-- Log motor commands for debugging
-- Provide a test harness for simulated movement
+Translate permitted high-level movement targets into PX4 external-control commands. PX4 supplies low-level flight stabilization in simulation. Building a replacement flight PID or directly driving motors is not required for this semester.
 
-## Inputs
-- Desired motion command (from Navigation)
-- State vector (from Navigation)
-- Safety constraints (from Safety Layer)
+## Inputs and outputs
 
-## Outputs
-- Motor command stub (placeholder values)
-- Logged motor activity
+- Inputs: navigation/docking targets, estimated vehicle state, safety decisions.
+- Outputs: bounded PX4 position or velocity targets and yaw commands; command/status logs.
+- Define units, coordinate frames, command expiration, and external-control lifecycle before connecting modules.
+- Log requested and sent targets separately from observed vehicle motion.
 
-## File Structure
-- `run_motion.py` — main entry point
-- `pid/` — PID controller structure
-- `commands/` — motor command stubs
-- `utils/` — logging + test harness
+## First tasks
 
-## Good First Issues
-- Add PID parameter placeholders
-- Create a motor command logging function
-- Add a simple test harness for simulated movement
+1. Establish a PX4 connection and read status/telemetry.
+2. Reproduce takeoff, hold, and landing in the stock simulation.
+3. Define a bounded command interface with navigation and safety.
+4. Handle rejected commands, stale requests, and loss of the control connection.
+5. Execute waypoint and docking targets through the same interface.
 
-## Future Phases
-- Real ESC control (Phase‑1)
-- Multi‑axis stabilization (Phase‑2)
-- Full motion control loop (Phase‑3)
+Maintain the command stream required by the selected PX4 interface and verify its loss-of-control behavior. Start from the [PX4 offboard example](https://docs.px4.io/main/en/ros2/offboard_control), using documentation matching the pinned release.
 
+## Acceptance evidence
 
+A repeatable flight script takes off, holds, and lands while recording targets and telemetry. Tests demonstrate bounds enforcement, command expiration, and the chosen abort behavior.
+
+A controlled mission abort and motor termination are distinct actions. Do not implement one ambiguous “kill switch” for both.
+
+Implementation files and run commands have not yet been created.
