@@ -32,6 +32,43 @@ No IR or depth sensors are used in Phase 0. Synthetic alignment values are test 
 
 Use `front` and `downward` consistently for camera identity. Document image dimensions and bounding-box conventions, including any changes made by preprocessing. Keep synthetic alignment fixtures separate from image-space detection boxes, with explicit units, frame, timestamp, source, and validity agreed with docking.
 
+### Example JSON observation
+
+The following is a proposed logging contract for the current Phase 0 detection stub, to be agreed with Docking and Navigation. It is not output currently produced by `synthetic_frames.py`; that script generates, preprocesses, displays, and saves images only.
+
+```json
+{
+  "timestamp_ns": 1000000000,
+  "clock": "fixture",
+  "source_id": "moving_rectangle_v1",
+  "frame_index": 0,
+  "camera_id": "front",
+  "image_width": 640,
+  "image_height": 480,
+  "synthetic": true,
+  "valid": true,
+  "reason": null,
+  "detections": [
+    {
+      "label": "synthetic_target",
+      "bbox_xywh": [20, 80, 80, 60]
+    }
+  ]
+}
+```
+
+- `timestamp_ns` is the source-frame time in nanoseconds, not the time the log was written. Here, `clock: "fixture"` means a deterministic fixture timeline, not Unix time. A replay or simulation must define its clock mapping before consumers evaluate freshness; never compare unrelated clocks or refresh an old observation by changing its timestamp.
+- `source_id` identifies the fixture sequence; `frame_index` identifies the frame within it. `camera_id` is either `front` or `downward`.
+- `bbox_xywh` contains `[x, y, width, height]` in pixels in the reported image dimensions. The origin is the top-left corner, x increases rightward, and y increases downward. The covered region is `[x, x + width)` by `[y, y + height)`.
+- `synthetic: true` identifies generated input and stub results. The box is prescribed by the fixture, not inferred by a detector and not a 3D measurement.
+- `valid` describes whether this observation is usable, not whether an object exists. For a valid empty frame, use `"valid": true`, `"reason": null`, and `"detections": []`.
+- For missing input, use `"valid": false`, `"reason": "missing_frame"`, and `"detections": []`; use `null` for unavailable image dimensions. Retain the expected fixture-frame time for a scheduled missing sample. Never copy the last detection into the new result.
+- Consumers must reject stale observations using a shared clock and an agreed maximum age, even when the producer originally reported `valid: true`.
+
+For logging, use JSON Lines (`.jsonl`): one complete observation object per line. The example is expanded above for readability. Synthetic alignment and cart occupancy use separate observation contracts.
+
+The proposed marker-based extension would add `marker_id`, `image_corners`, and `relative_pose` (or `null` when unavailable). Those fields require agreement on marker corner order, pose direction, coordinate frames, units, and pose validity; this stub example does not introduce marker detection or pose estimation as Phase 0 requirements.
+
 ## Cart occupancy and size-class observations
 
 The cart-sensor observation contract must represent occupancy and these size classes:
