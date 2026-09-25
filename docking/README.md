@@ -29,4 +29,14 @@ The required demonstration uses synthetic alignment inputs, not visual pose esti
 
 The drone approaches, aligns, and lands within the agreed tolerance. Logs show observations and transition reasons. Tests include missing/stale synthetic inputs and low-battery behavior. A land command alone does not count as confirmed landing; define completion using vehicle status and evaluation data.
 
-Implementation files and run commands have not yet been created.
+## Starter structure
+
+- `states/docking_state.py` — docking state names, exported as `DockingState`.
+- `alignment/` — placeholder package for synthetic alignment logic.
+- `utils/` — placeholder package for docking event logging.
+- `run_docking.py` — placeholder entry point.
+
+These stubs follow the motion engine starter structure. State transitions,
+alignment calculations, event logging, and the runnable docking sequence still
+need to be implemented. `COMPLETE` names a future confirmed landing state;
+the stubs do not issue commands or report a successful landing.
