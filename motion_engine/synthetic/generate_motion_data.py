@@ -20,7 +20,8 @@ Usage (from the repo root):
     py -3 motion_engine/synthetic/generate_motion_data.py --noise 0.02
     py -3 motion_engine/synthetic/generate_motion_data.py --rate 20 --out some/folder
 
-Outputs one CSV per scenario, plus a PNG plot if matplotlib is installed.
+Outputs one CSV per scenario, plus a PNG plot if matplotlib is installed,
+into motion_engine/motion_logs/ (change with --out).
 """
 
 from __future__ import annotations
@@ -201,7 +202,7 @@ def plot(all_rows: Dict[str, List[dict]], path: Path) -> bool:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--out", type=Path, default=Path(__file__).resolve().parent / "data")
+    p.add_argument("--out", type=Path, default=_MOTION_ENGINE_ROOT / "motion_logs")
     p.add_argument("--rate", type=float, default=10.0, help="samples per second (default 10)")
     p.add_argument("--noise", type=float, default=0.0,
                    help="std-dev of position noise in metres (default 0 = perfectly clean)")

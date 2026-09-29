@@ -4,12 +4,15 @@ Simple, hand-readable flight data for the Motion Engine: the drone going up,
 down, left, right, forward, back, and spinning in place.
 
 ```bash
-py -3 motion_engine/synthetic/generate_motion_data.py              # all scenarios -> synthetic/data/
+py -3 motion_engine/synthetic/generate_motion_data.py              # all scenarios -> motion_engine/motion_logs/
 py -3 motion_engine/synthetic/generate_motion_data.py rotate square
 py -3 motion_engine/synthetic/generate_motion_data.py --noise 0.02 # add a little sensor jitter
 ```
 
 ## Scenarios
+
+Output goes to `motion_engine/motion_logs/` (one CSV per scenario + `overview.png`).
+
 
 | File | What the drone does |
 |---|---|
