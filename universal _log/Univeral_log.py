@@ -29,8 +29,17 @@ class UniversalLog:
         else:
             logger.setLevel(logging.ERROR)
             # Changed to .error() so it meets the ERROR threshold set above
-            logger.error(f'Undefined state: {info[0]}') 
-
+            logger.error(f'Undefined state: {info[0]}')
+""" tester for basic logging don't uncomment
 class main:
-    state = ["TRACKING", "cheese"]
-    UniversalLog(state)
+    for x in range(9):
+        if x == 3:
+            state = ["TRACKING", "cheese"]
+            UniversalLog(state)
+        elif x == 5:
+            state = ["IDLE", "cheese"]
+            UniversalLog(state)
+        else:
+            state = ["oliver", "cheese"]
+            UniversalLog(state)
+"""
