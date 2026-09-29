@@ -4,7 +4,7 @@ import sys
 class UniversalLog:
     def __init__(self, info):
         # 1. Define handlers for both the file and the console (stdout)
-        file_handler = logging.FileHandler("newfile.log")
+        file_handler = logging.FileHandler("logged_states.log")
         console_handler = logging.StreamHandler(sys.stdout)
         
         # 2. Apply your configuration with the handlers
