@@ -1,0 +1,44 @@
+[
+  {
+    "Timestamp": "2026-09-29T10:00:00.000Z",
+    "State": "IDLE",
+    "Details": {
+      "reason": "waiting for mission"
+    }
+  },
+  {
+    "Timestamp": "2026-09-29T10:00:05.000Z",
+    "State": "TRACKING",
+    "Details": {
+      "position_m": {
+        "x": 1.25,
+        "y": -0.4,
+        "z": 2.0
+      },
+      "battery_percent": 92
+    }
+  },
+  {
+    "Timestamp": "2026-09-29T10:00:10.000Z",
+    "State": "DOCKING_APPROACH",
+    "Details": {
+      "pad_distance_m": 0.8,
+      "alignment_error_m": 0.12
+    }
+  },
+  {
+    "Timestamp": "2026-09-29T10:00:15.000Z",
+    "State": "ABORT",
+    "Details": {
+      "reason": "test abort",
+      "source": "test fixture"
+    }
+  },
+  {
+    "Timestamp": "2026-09-29T10:00:20.000Z",
+    "State": "NOT_A_REAL_STATE",
+    "Details": {
+      "reason": "verify unknown-state error level"
+    }
+  }
+]
