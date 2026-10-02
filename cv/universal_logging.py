@@ -1,7 +1,7 @@
-"""Bridge the shared logger's current filename to the CV module.
+"""Bridge the shared logger to the CV module.
 
-Load by path because ``universal _log/Universal_log.py`` is not a conventional
-Python import name. Keep its implementation and output policy in one place.
+Load ``universal_log/Universal_log.py`` by path so package imports and direct
+script execution share the same implementation and output policy.
 """
 
 from functools import lru_cache
@@ -11,7 +11,7 @@ from pathlib import Path
 
 @lru_cache(maxsize=1)
 def _logger_class():
-    path = Path(__file__).resolve().parents[1] / "universal _log" / "Universal_log.py"
+    path = Path(__file__).resolve().parents[1] / "universal_log" / "Universal_log.py"
     spec = spec_from_file_location("_cv_shared_universal_log", path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load shared logger at {path}")

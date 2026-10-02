@@ -70,8 +70,8 @@ cv.stop_camera()
 ```
 
 Default logging uses the repository's `UniversalLog` class from
-[`universal _log/Univeral_log.py`](../universal%20_log/Univeral_log.py), loaded
-through `cv/universal_logging.py` to accommodate the current filename. It logs
+[`universal_log/Universal_log.py`](../universal_log/Universal_log.py), loaded
+through `cv/universal_logging.py` for package and direct script execution. It logs
 `camera_started`, every `observation`, `source_exhausted`, and `camera_stopped`.
 Repeated `stop_camera()` calls do not duplicate the stop record.
 
@@ -83,7 +83,7 @@ camera/source identity and, when available, the last observation.
 
 UniversalLog's outer timestamp is wall-clock emission time. Source and mapped
 sample times remain inside `Details`; consumers must use those explicit clocks
-for freshness. The shared class controls its file output under `universal _log/`.
+for freshness. The shared class controls its file output under `universal_log/`.
 Tests or coordinators can inject a `log_sink` callable accepting the same entry
 dictionary, including an already configured UniversalLog wrapper.
 
