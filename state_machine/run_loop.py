@@ -13,14 +13,20 @@ TICK_MS = 1000 // TICK_HZ  # 100 ms per tick
 DEMO_SCENARIO = [
     (1000, {"bird": {"detected": True, "type": "hawk", "distance_m": 30.0}}),
     (4000, {"bird": {"detected": False, "type": None, "distance_m": None}}),
+    # Low battery and a moving cart: Safety blocks everything except hold
     (5000, {"battery": {"percent": 18}, "docking": {"should_dock": True, "reason": "low_battery"},
-            "safety": {"cart_moving": True, "approach_permitted": False}}),
-    (6000, {"safety": {"cart_moving": False, "approach_permitted": True}}),
+            "safety": {"permissions": {"launch": False, "tracking": False, "approach": False, "descent": False, "hold": True},
+                       "battery_low": True, "battery_recovered": False, "reasons": ["low_battery", "cart_moving"]}}),
+    # The cart stops, so approach and descent are permitted; low battery still blocks launch and tracking
+    (6000, {"safety": {"permissions": {"launch": False, "tracking": False, "approach": True, "descent": True, "hold": True},
+                       "reasons": ["low_battery"]}}),
     (6100, {"docking": {"phase": "approach"}}),
     (7000, {"docking": {"phase": "align"}}),
     (7500, {"docking": {"phase": "descend"}}),
     (8000, {"docking": {"phase": "complete", "landed_on_pad": True, "should_dock": False, "reason": None}}),
-    (9000, {"battery": {"percent": 90}}),
+    (9000, {"battery": {"percent": 90},
+            "safety": {"permissions": {"launch": True, "tracking": True, "approach": True, "descent": True, "hold": True},
+                       "battery_low": False, "battery_recovered": True, "reasons": []}}),
 ]
 
 
@@ -30,14 +36,13 @@ def init_world() -> dict:
         "bird": {"detected": False, "type": None, "distance_m": None},
         "battery": {"percent": 100},
         "safety": {
-                "people_nearby": False, 
-                "cart_moving": False,
-                "weather": "clear", 
-                "camera_ok": True,
-                "comm_ok": True,
-                "approach_permitted": True,
-                "descent_permitted": True,
-                "hold_permitted": True
+                "permissions": {"launch": True, "tracking": True, "approach": True, "descent": True, "hold": True},
+                "emergency": False,
+                "abort": False,
+                "battery_low": False,
+                "battery_critical": False,
+                "battery_recovered": True,
+                "reasons": []
                 },
         "docking": {"phase": "idle", "landed_on_pad": False, "should_dock": False, "reason": None},
     }

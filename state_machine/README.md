@@ -32,7 +32,7 @@ These names are part of the Phase 0 → Phase 1 interface contract and must not 
 
 - Input: the current state and one observation per tick (see the observation format below).
 - Output: the next state and a transition reason, written to the observation's `state` field and to the log.
-- The state machine reads Docking's `should_dock`, `reason`, `phase` and `landed_on_pad`; it does not re-evaluate docking triggers itself. Likewise, it reads the Safety layer's decisions (such as `approach_permitted`, `descent_permitted` and `hold_permitted`) rather than re-deriving safety rules, so it never checks whether the dock is clear itself.
+- The state machine reads Docking's `should_dock`, `reason`, `phase` and `landed_on_pad`; it does not re-evaluate docking triggers itself. Likewise, it reads the Safety layer's decisions (`permissions`, `emergency`, `abort` and `battery_recovered`) rather than re-deriving safety rules, so it never checks whether the dock is clear itself.
 
 Proposed interface:
 
@@ -49,9 +49,9 @@ next_state, reason = step(current_state, observation)
   "timestamp": "...",
   "bird":    { "type": "hawk", "distance_m": 32.5, "detected": true },
   "battery": { "percent": 42, "low": false },
-  "safety":  { "people_nearby": false, "cart_moving": false,
-               "weather": "clear", "camera_ok": true, "comm_ok": true,
-               "approach_permitted": true, "descent_permitted": true, "hold_permitted": true },
+  "safety":  { "permissions": { "launch": true, "tracking": true, "approach": true, "descent": true, "hold": true },
+               "emergency": false, "abort": false,
+               "battery_low": false, "battery_critical": false, "battery_recovered": true, "reasons": [] },
   "docking": { "should_dock": false, "reason": null, "phase": "idle", "landed_on_pad": false },  "state":   "TRACKING"
 }
 ```
@@ -72,28 +72,29 @@ Docking may be requested for any of the following. Docking computes `should_dock
 
 Rules are checked in priority order and the first match wins:
 
-1. **Global overrides.** Conditions that apply in any airborne state, such as critical battery, go to `EMERGENCY_LAND`.
+1. **Global overrides.** In any airborne state, Safety's `emergency` goes to `EMERGENCY_LAND`, then Safety's `abort` goes to `ABORT` (except from `ABORT` itself).
 2. **Per-state rules.** From the table below.
 3. **Default.** No match means the state is unchanged.
 
 | From | Condition | To |
 |---|---|---|
 | `IDLE` | `should_dock` | Ignored; stays `IDLE` (a grounded drone ignores return requests) |
-| `IDLE` | Bird detected and safe | `HOVERING` (start the launch) |
+| `IDLE` | Bird detected and `launch` permitted | `HOVERING` (start the launch) |
 | `TRACKING` | `should_dock` | `DOCKING_INIT` |
-| `TRACKING` | Unsafe | `HOVERING` |
+| `TRACKING` | `tracking` not permitted | `HOVERING` |
 | `TRACKING` | Bird lost | `HOVERING` |
 | `HOVERING` | `should_dock` or hover timeout | `DOCKING_INIT` |
-| `HOVERING` | Bird detected and safe | `TRACKING` |
-| `DOCKING_INIT` | Safety permits the approach (`approach_permitted`) | `DOCKING_APPROACH` |
+| `HOVERING` | Bird detected and `tracking` permitted | `TRACKING` |
+| `DOCKING_INIT` | Safety permits the approach (`approach`) | `DOCKING_APPROACH` |
 | `DOCKING_INIT` | Approach not permitted | Stay and hold |
 | `DOCKING_APPROACH` | Docking phase `abort`, approach permission lost, or descent permission lost while descending | `ABORT` |
 | `DOCKING_APPROACH` | Docking confirms `landed_on_pad` | `DOCKED` |
-| `DOCKED` | Battery recovered and no docking triggers active | `IDLE` |
-| `ABORT` | Safety permits holding (`hold_permitted`) | `DOCKING_INIT` (retry docking) |
+| `DOCKED` | Safety reports `battery_recovered` | `IDLE` |
+| `ABORT` | Safety permits holding (`hold`) | `DOCKING_INIT` (retry docking) |
 | `ABORT` | Holding not permitted | Stay in `ABORT` |
 | `ABORT` | Not recoverable | `EMERGENCY_LAND` |
-| Any airborne state | Critical battery | `EMERGENCY_LAND` |
+| Any airborne state | Safety `emergency` (e.g. critical battery) | `EMERGENCY_LAND` |
+| Any airborne state except `ABORT` | Safety `abort` (e.g. operator abort) | `ABORT` |
 
 The cart-motion rule in the [main README](../README.md) applies: the drone never lands on a moving cart. While the cart is moving, docking waits in a safe state.
 
@@ -103,7 +104,7 @@ Docking rules follow the [integration contract](../INTEGRATION_README.md) (secti
 - Docking's local `phase` (`idle`, `approach`, `search`, `align`, `descend`, `complete`, `abort`; see [`docking/states/docking_state.py`](../docking/states/docking_state.py)) only runs while the mission is in `DOCKING_APPROACH`.
 - Docking reports `landed_on_pad` once touchdown is confirmed, and phase `abort` when the attempt fails.
 
-The field names `approach_permitted`, `descent_permitted`, `hold_permitted`, `phase` and `landed_on_pad` are proposed; confirm them with the Safety and Docking teams.
+The `safety` field names come from Safety's `SafetyAssessment` (PR #61). The Docking field names `phase` and `landed_on_pad` are proposed; confirm them with the Docking team.
 
 ### Open questions
 
