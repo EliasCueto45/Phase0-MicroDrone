@@ -1,238 +1,113 @@
 # Motion Engine — Phase 0
 
-[Phase 0 scope: Start Here](../START_HERE.md)
+[Phase 0 scope: Start Here](../START_HERE.md) · [Shared integration contract](../INTEGRATION_README.md)
 
-## Purpose
+## Current milestone: the synthetic loop
+
+For the integration milestone there is no drone and no PX4 in the loop.
+Motion's job is the kinematic stub, [`motion_stubs.py`](motion_stubs.py),
+driven by the central coordinator through the contract in
+[INTEGRATION_README.md](../INTEGRATION_README.md) §3-§5. Motion owns the
+synthetic vehicle pose and its execution status, and never a mission state.
+
+### Contract (`motion_engine/contracts.py`)
+
+| Type | Direction | What it carries |
+|---|---|---|
+| `Command` | coordinator → Motion | `command_id`, `kind`, `mission_state`, `target` (`Pose`, local ENU), `frame`, optional speed caps, `issued_ns`, `expires_ns`, `source`, `reason` |
+| `CommandAck` | Motion → coordinator, immediately | `command_id`, `accepted`, stable `reason`, `active_command_id` (what is still flying after this) |
+| `VehicleFeedback` | Motion → snapshot `vehicle` section | pose, `armed`, `airborne`, `grounded`, `emergency_descent`, `landing_settled`, active command ID/kind/target, `status`, `arrived`, errors, `timestamp_ns`, `valid` |
+
+One coordinator tick:
+
+```python
+from motion_engine.contracts import Command, MotionCommandType as K, Pose, SimulationClock
+from motion_engine.motion_stubs import MotionStub
+
+clock = SimulationClock()                 # integer ns, starts at 0
+motion = MotionStub(logger=shared_logger, clock=clock)
+
+ack = motion.submit(command, clock.timestamp_ns)   # step 8: dispatch, record ack
+motion.step(0.1, now_ns=clock.timestamp_ns)        # advance Motion exactly once
+vehicle = motion.feedback(clock.timestamp_ns)      # post-motion feedback
+clock.advance(0.1)
+```
+
+Rules Motion enforces:
+
+- **Accepted is not done.** `status` goes `in_progress` → `arrived`, and for
+  landing commands → `landed`. `arrived` uses the 0.25 m arrival tolerance and
+  can be true while still airborne, so docking must check `landing_settled`
+  (z exactly 0 after a landing command), never `arrived`.
+- **Expiry.** Every command except arm/disarm/takeoff/land/emergency needs
+  `expires_ns`. Re-sending the active `command_id` with a later expiry renews
+  it: no restart, no new log line. If it expires, Motion replaces it with a
+  hold at the current pose *before* moving that tick (`status = expired_hold`).
+- **Replacement.** An accepted command replaces the active target
+  immediately, so a hold sent this tick stops the drone this tick.
+- **No silent clamps.** A target above the ceiling or outside the geofence is
+  rejected (`target_outside_limits`), not clamped. The direct methods still
+  clamp, for scripts.
+- **Emergency latch.** After `EMERGENCY_LAND` every other command is rejected
+  (`emergency_descent_active`), repeats are idempotent, emergency never
+  expires, and touchdown auto-disarms.
+- **Bad input is a result, not an exception.** Missing target or expiry, NaN
+  or inf, wrong frame or schema, future timestamps and reused IDs each come
+  back as a rejected ack with a stable reason (`contracts.Reason`).
+
+Limits default to the INTEGRATION_README §5 table (`MotionLimits`): 5 / 2 m/s,
+90 deg/s, 150 m geofence, 30 m ceiling, 0.25 m / 3 deg tolerances, 1 m/s
+emergency descent. Pass the same `MotionLimits` that Safety uses.
+
+Logging goes through any object with the agreed
+`log(module, event, *, fields, state, truth, decision, t)` method. The shared
+logger is planned for `state_machine/logging_format.py`; until it exists,
+`contracts.MemoryLogSink` is an in-memory stand-in. Motion no longer imports
+the old `mission.logging_format`.
+
+### Runnable checks
+
+```bash
+py -3 -m pytest motion_engine/tests/test_motion_stubs.py motion_engine/tests/test_motion_contract.py
+py -3 motion_engine/synthetic/generate_motion_data.py      # synthetic CSVs, see synthetic/README.md
+```
+
+`test_motion_contract.py` covers the README's Motion deliverables: approach
+and descent, cancellation, ordinary disarm, emergency-latch interaction,
+expiry and renewal, rejected input, and identical traces from identical inputs.
+
+## Phase-1 (PX4) goals
+
+The original PX4 plan. It comes after the synthetic milestone above.
+
+### Purpose
 
 Translate permitted high-level movement targets into PX4 external-control commands. PX4 supplies low-level flight stabilization in simulation. Building a replacement flight PID or directly driving motors is not required for this semester.
 
-## Inputs and outputs
+### Inputs and outputs
 
 - Inputs: navigation/docking targets, estimated vehicle state, safety decisions.
 - Outputs: bounded PX4 position or velocity targets and yaw commands; command/status logs.
 - Define units, coordinate frames, command expiration, and external-control lifecycle before connecting modules.
 - Log requested and sent targets separately from observed vehicle motion.
 
----
+### First tasks
 
-## Comms Architecture — Dual Link (MAVLink + uXRCE-DDS)
+1. Establish a PX4 connection and read status/telemetry.
+2. Reproduce takeoff, hold, and landing in the stock simulation.
+3. Define a bounded command interface with navigation and safety.
+4. Handle rejected commands, stale requests, and loss of the control connection.
+5. Execute waypoint and docking targets through the same interface.
 
-The drone runs **two independent links** between the PX4 flight controller and the
-companion computer. Each carries a different class of traffic.
+Maintain the command stream required by the selected PX4 interface and verify its loss-of-control behavior. Start from the [PX4 offboard example](https://docs.px4.io/main/en/ros2/offboard_control), using documentation matching the pinned release.
 
-| Link | Owns | Why this link |
-|---|---|---|
-| **MAVLink** | Golf cart ↔ drone communication, motion commands, operator/GCS traffic | Radio-native, multi-node, lossy-tolerant. The only protocol QGroundControl speaks, and the only one that reaches an off-board vehicle over a telemetry radio |
-| **uXRCE-DDS** | Image processing: CV pose/detections in, state estimate out | A near-direct mirror of PX4's internal uORB bus into ROS 2 topics. No translation layer, minimum latency on the highest-rate stream in the system |
+### Acceptance evidence
 
-### Our split
+A repeatable flight script takes off, holds, and lands while recording targets and telemetry. Tests demonstrate bounds enforcement, command expiration, and the chosen abort behavior.
 
-**MAVLink — golf cart, motion, and operator**
-- Golf cart ↔ drone link: the cart is the mobile ground station. Commands out, telemetry back
-- Motion commands: waypoints, goto targets, takeoff/land/RTL
-- Arm / disarm, flight-mode changes, kill — the safety path
-- Parameter get/set, sensor calibration, airframe config
-- Low-rate telemetry: attitude, GPS, battery, RC, status text
-- ULog download (on the ground — it saturates the radio)
+A controlled mission abort and motor termination are distinct actions. Do not implement one ambiguous “kill switch” for both.
 
-**uXRCE-DDS — image processing**
-- `/fmu/in/vehicle_visual_odometry` — pose from the CV subteam's vision node, 30–50 Hz
-- `/fmu/out/vehicle_odometry` — fused EKF2 state estimate, back to `navigation/` and the CV node
-- `/fmu/out/vehicle_local_position` — local NED position for the control loop
-- `/fmu/out/vehicle_status` — arming state, nav state, failsafe flags
-- `/fmu/out/timesync_status` — FC↔companion clock offset; watch it when debugging vision latency
-
-### Why both, instead of picking one
-
-Dropping either forces a real compromise:
-
-- **XRCE-only** loses QGroundControl and the golf cart link. XRCE is a
-  point-to-point bridge to one companion computer, not a radio protocol — it
-  has no answer for talking to a separate ground vehicle. You'd also lose
-  parameter config, calibration, and field monitoring without building custom
-  ROS 2 UI tools.
-- **MAVLink-only** forces vision data through a MAVROS translation layer
-  (`VISION_POSITION_ESTIMATE`). PX4 is built around an internal bus called uORB;
-  uXRCE-DDS mirrors it almost directly, while MAVLink packs and unpacks a generic
-  packet on both ends. That's fine for "go to waypoint X" and wrong for 50 Hz
-  camera-derived pose.
-
-### The dividing rule
-> **Off-vehicle or human-initiated → MAVLink.**  
-> **Vision pipeline on the companion computer → uXRCE-DDS.**
-
-> ⚠️ **One caveat on putting motion on MAVLink.** Waypoint- and goto-style commands
-> are a good fit. If Phase‑2+ moves to a true *offboard* control loop streaming
-> setpoints at 20–50 Hz, that loop should move to
-> `/fmu/in/trajectory_setpoint` + `/fmu/in/offboard_control_mode` over uXRCE-DDS —
-> MAVLink adds parse latency at that rate. The golf cart link stays MAVLink either
-> way. Revisit this when the control loop stops being stubs.
-
----
-
-## Physical Wiring
-
-```
-        Golf cart (mobile GCS)
-              ▲
-              │ telemetry radio, MAVLink
-              ▼
-  Flight Controller (PX4, e.g. Pixhawk)
-  ┌──────────────────────────────────┐
-  │  TELEM1 ──── MAVLink 57600 ───────┼──► radio ──► golf cart / QGroundControl
-  │  TELEM2 ──── uXRCE-DDS 921600 ────┼──┐
-  └──────────────────────────────────┘  │
-                                        ▼
-  Companion Computer (4 GB RAM)
-  ┌──────────────────────────────────────────────┐
-  │  MicroXRCEAgent  ──► ROS 2 /fmu/* topics      │
-  │       ▲                    ▲                 │
-  │  cv/ vision node     navigation/ + motion    │
-  └──────────────────────────────────────────────┘
-```
-
-If the airframe has Ethernet (Pixhawk 6X, CUAV X7+), put uXRCE-DDS on Ethernet
-(UDP) and leave both UARTs free.
-
----
-
-## Configuration
-
-### PX4 — MAVLink on TELEM1
-```
-MAV_0_CONFIG  = 101        # TELEM 1
-MAV_0_MODE    = 0          # Normal
-MAV_0_RATE    = 1200       # B/s. Keep low — a 57.6 kbps radio saturates fast
-SER_TEL1_BAUD = 57600
-```
-
-### PX4 — uXRCE-DDS on TELEM2
-```
-UXRCE_DDS_CFG    = 102     # TELEM 2   (or 1000 for Ethernet)
-SER_TEL2_BAUD    = 921600
-UXRCE_DDS_DOM_ID = 0       # must match ROS_DOMAIN_ID on the companion
-UXRCE_DDS_KEY    = 1       # unique per vehicle
-```
-
-### PX4 — EKF2, to actually consume the vision pose
-Setting the topic up is not enough; EKF2 ignores external vision until told to fuse it.
-```
-EKF2_EV_CTRL  = 15         # bitmask: horiz. pos + vert. pos + velocity + yaw
-EKF2_HGT_REF  = 3          # Vision as primary height reference (indoor / no GPS)
-EKF2_EV_DELAY = <measured> # ms, camera-to-FC latency. Measure it, don't guess
-```
-> `EKF2_EV_CTRL` replaced the old `EKF2_AID_MASK` in PX4 v1.14 — confirm against
-> the version pinned in `external/PX4-Autopilot`. An unmeasured `EKF2_EV_DELAY`
-> is the most common cause of a vision-fused estimate that oscillates or drifts.
-
-### Companion — XRCE agent
-```bash
-MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600   # TELEM2
-MicroXRCEAgent udp4 -p 8888                          # Ethernet / SITL
-```
-ROS 2 nodes need `px4_msgs` built from the **same PX4 version** as the firmware.
-Mismatched definitions fail silently — topics appear but fields are garbage.
-
-### Companion — MAVLink router (optional)
-Only for GCS access over Wi-Fi on the bench. Keep a **direct** FC→radio path for
-flight: routing the safety path through the companion computer reintroduces the
-dependency the split exists to avoid.
-```ini
-# /etc/mavlink-router/main.conf
-[UartEndpoint fc]
-Device = /dev/ttyAMA0
-Baud = 57600
-
-[UdpEndpoint gcs]
-Mode = Normal
-Address = <golf cart IP>
-Port = 14550
-```
-
-### Verify
-```bash
-ros2 topic list | grep fmu                # /fmu/out/* within a few seconds
-ros2 topic hz /fmu/out/vehicle_odometry   # expect your configured rate
-# QGroundControl: heartbeat within ~5 s, params load, no STATUSTEXT errors
-```
-
----
-
-## Gotchas
-
-- **QoS mismatch silently drops everything.** PX4 publishes `/fmu/out/*` as
-  `BEST_EFFORT` + `KEEP_LAST(5)`. A subscriber defaulting to `RELIABLE` connects
-  to nothing and reports no error. Set the profile explicitly.
-- **Domain ID must match.** `UXRCE_DDS_DOM_ID` on the FC vs `ROS_DOMAIN_ID` in the
-  companion's shell. A mismatch looks exactly like a dead cable.
-- **Baud matters.** At 115200 the odometry stream will not sustain 50 Hz. Use
-  921600 or Ethernet.
-- **`MAV_0_RATE` is bytes/second, not a percentage.** Too high on a 57.6 kbps
-  radio drops heartbeats, which looks like a hardware fault.
-- **TELEM2 is spoken for.** Don't assign a MAVLink instance to it.
-- **Don't subscribe to `/fmu/out/sensor_combined` in flight code.** Highest-rate
-  topic on the bus; it will eat the CPU budget for no benefit.
-
-### RAM budget (4 GB companion)
-| Process | Rough footprint |
-|---|---|
-| ROS 2 middleware + XRCE agent | ~300–400 MB |
-| CV node (tracking) | 400 MB – 1.5 GB depending on model |
-| motion_engine loop | < 100 MB |
-| mavlink-router | < 20 MB |
-
-Two protocols cost far less than the headroom a vision model needs — the split is
-not where the memory goes. If it gets tight, cap the XRCE publication rate before
-touching the MAVLink side.
-
----
-
-## Inputs
-- Desired motion command (from Navigation, and from the golf cart over MAVLink)
-- State vector (from Navigation, via `/fmu/out/vehicle_odometry` over uXRCE-DDS)
-- Safety constraints (from Safety Layer)
-
-## Outputs
-- Motor command stub (placeholder values, Phase‑0)
-- Motion commands to PX4 over MAVLink (Phase‑1+)
-- Logged motor activity
-
-## File Structure
-- `run_motion.py` — main entry point
-- `pid/` — PID controller structure
-- `commands/` — motor command stubs
-- `utils/` — logging + test harness
-- `sitl/` — PX4 SITL + Gazebo bridge: boots a real simulated drone in WSL and
-  flies a hover test over MAVLink/MAVSDK. Opt-in only — see `sitl/README.md`
-  for the architecture and `RUN_SITL_TESTS=1 pytest tests/test_sitl_hover.py`
-  to run it. The stub-based commands above and this live-sim path are
-  independent; nothing in `commands/`/`pid/` depends on `sitl/`.
-
-## Phase‑0 Scope
-Phase‑0 is **SITL only**. In `sitl/`, PX4's Onboard MAVLink instance streams to
-UDP 14540 and MAVSDK connects to it; the XRCE side runs as
-`MicroXRCEAgent udp4 -p 8888` against the same simulated vehicle. No physical
-UARTs and no golf cart yet — the wiring above is the target architecture the
-SITL work stands in for.
-
-## Open Decisions
-- **Companion computer** not yet selected (Raspberry Pi 5 / Jetson Orin Nano /
-  other). Decides whether TELEM2 attaches via native UART or a USB-to-UART
-  bridge, and whether Ethernet XRCE is available at all.
-- **Golf cart side**: what runs there — full QGroundControl, or a custom
-  MAVLink node? Determines whether we need a second MAVLink instance.
-- CV output format: full VIO pose vs. bearing-only target track.
-
-## Good First Issues
-- Add PID parameter placeholders
-- Create a motor command logging function
-- Add a simple test harness for simulated movement
-- Write a health check that reports both links up/down in one command
-- Measure and document `EKF2_EV_DELAY` for our camera + FC pair
-
-## Future Phases
-- Phase‑1: Real ESC control; real UART bring-up of both links; golf cart radio link
-- Phase‑2: Multi‑axis stabilization; decide whether the control loop moves to
-  offboard setpoints over uXRCE-DDS (see caveat above)
-- Phase‑3: Full motion control loop; link-loss failsafe (behavior when XRCE drops
-  but MAVLink survives)
+The PX4 side (offboard connection, SITL flight script) is not part of the
+synthetic milestone. Each `MotionStub` method has a `# PHASE-1 HOOK:` comment
+naming the PX4 command it becomes; `grep -n "PHASE-1 HOOK" motion_engine/motion_stubs.py`
+is the to-do list.
