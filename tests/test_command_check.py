@@ -6,25 +6,33 @@ Run this from the main project folder:
 
 import unittest
 
+from motion_engine.contracts import Command, MotionCommandType, Pose, Reason
+
 from safety_layer import config
-from safety_layer.command_check import Command, check_command
+from safety_layer.command_check import (
+    ACTION_NOT_PERMITTED,
+    ALTITUDE_CEILING,
+    EMERGENCY,
+    GEOFENCE_BREACH,
+    SPEED_LIMIT,
+    UNDERGROUND_TARGET,
+    check_command,
+)
 from safety_layer.safety_policy import assess
 from tests.test_safety_policy import NOW, snapshot
 
 
 def good_order(**changes):
-    """A perfectly safe order, unless a test changes something."""
+    """A perfectly safe tracking order, unless a test changes something."""
     base = dict(
         command_id="cmd-1",
-        kind="track",
-        x_m=10.0,
-        y_m=10.0,
-        z_m=15.0,
-        horizontal_speed_mps=4.0,
-        vertical_speed_mps=1.0,
-        yaw_rate_dps=30.0,
+        kind=MotionCommandType.TRACK_TARGET,
+        mission_state="TRACKING",
         issued_ns=NOW,
+        expires_ns=NOW + int(0.2 * config.NS_PER_S),
         source="navigation",
+        reason="track_bird",
+        target=Pose(x=10.0, y=10.0, z=15.0, yaw_deg=0.0),
     )
     base.update(changes)
     return Command(**base)
@@ -42,102 +50,137 @@ class TestGoodOrder(unittest.TestCase):
         self.assertEqual(decision.command.command_id, "cmd-1")
         self.assertEqual(decision.reasons, ())
 
+    def test_takeoff_without_an_expiry_is_fine(self):
+        """Lifecycle orders may carry no expiry at all."""
+        grounded = assess(snapshot(flight_active=False), NOW)
+        takeoff = good_order(
+            kind=MotionCommandType.TAKEOFF,
+            mission_state="HOVERING",
+            expires_ns=None,
+            target=Pose(z=5.0),
+        )
+        decision = check_command(takeoff, grounded, NOW)
+        self.assertTrue(decision.allowed)
+
 
 class TestExpiredOrders(unittest.TestCase):
-    def test_old_order_is_replaced_with_hold(self):
-        """Orders last 0.2 s. This one is half a second old."""
-        old = good_order(issued_ns=NOW - int(0.5 * config.NS_PER_S))
+    def test_order_past_its_expiry_is_replaced(self):
+        old = good_order(expires_ns=NOW - 1)
         decision = check_command(old, all_clear(), NOW)
         self.assertFalse(decision.allowed)
-        self.assertIn("command_expired", decision.reasons)
-        self.assertEqual(decision.command.kind, "hold")
+        self.assertIn(Reason.COMMAND_EXPIRED, decision.reasons)
+        self.assertEqual(decision.command.kind, MotionCommandType.HOVER)
 
-    def test_order_from_the_future_is_rejected(self):
-        future = good_order(issued_ns=NOW + config.NS_PER_S)
-        decision = check_command(future, all_clear(), NOW)
-        self.assertIn("command_expired", decision.reasons)
+    def test_old_takeoff_without_expiry_still_goes_stale(self):
+        """No expiry field, so we measure from when it was issued."""
+        grounded = assess(snapshot(flight_active=False), NOW)
+        stale = good_order(
+            kind=MotionCommandType.TAKEOFF,
+            expires_ns=None,
+            issued_ns=NOW - int(0.5 * config.NS_PER_S),
+            target=Pose(z=5.0),
+        )
+        decision = check_command(stale, grounded, NOW)
+        self.assertIn(Reason.COMMAND_EXPIRED, decision.reasons)
 
 
 class TestLimits(unittest.TestCase):
     def test_outside_the_fence_is_replaced(self):
-        far_away = good_order(x_m=200.0, y_m=0.0)  # fence is 150 m
+        far_away = good_order(target=Pose(x=200.0, y=0.0, z=10.0))
         decision = check_command(far_away, all_clear(), NOW)
-        self.assertIn("geofence_breach", decision.reasons)
-        self.assertEqual(decision.command.kind, "hold")
+        self.assertIn(GEOFENCE_BREACH, decision.reasons)
+        self.assertEqual(decision.command.kind, MotionCommandType.HOVER)
 
     def test_too_high_is_replaced(self):
-        too_high = good_order(z_m=45.0)            # ceiling is 30 m
-        decision = check_command(too_high, all_clear(), NOW)
-        self.assertIn("altitude_ceiling", decision.reasons)
+        decision = check_command(good_order(target=Pose(z=45.0)), all_clear(), NOW)
+        self.assertIn(ALTITUDE_CEILING, decision.reasons)
 
-    def test_too_fast_sideways_is_replaced(self):
-        too_fast = good_order(horizontal_speed_mps=9.0)   # limit is 5
-        decision = check_command(too_fast, all_clear(), NOW)
-        self.assertIn("horizontal_speed_limit", decision.reasons)
+    def test_underground_target_is_replaced(self):
+        decision = check_command(good_order(target=Pose(z=-3.0)), all_clear(), NOW)
+        self.assertIn(UNDERGROUND_TARGET, decision.reasons)
 
-    def test_too_fast_downward_is_replaced(self):
-        too_fast = good_order(vertical_speed_mps=6.0)     # limit is 2
-        decision = check_command(too_fast, all_clear(), NOW)
-        self.assertIn("vertical_speed_limit", decision.reasons)
+    def test_speed_cap_above_our_limit_is_refused(self):
+        """Caps may only slow the drone down, never speed it up."""
+        fast = good_order(max_horizontal_speed_mps=9.0)   # limit is 5
+        decision = check_command(fast, all_clear(), NOW)
+        self.assertIn(SPEED_LIMIT, decision.reasons)
 
-    def test_replacement_order_stops_the_drone(self):
-        """The swapped-in order must have zero speed, not just a new name."""
-        decision = check_command(good_order(z_m=45.0), all_clear(), NOW)
-        self.assertEqual(decision.command.horizontal_speed_mps, 0.0)
-        self.assertEqual(decision.command.vertical_speed_mps, 0.0)
+    def test_lower_speed_cap_is_fine(self):
+        slow = good_order(max_horizontal_speed_mps=2.0)
+        decision = check_command(slow, all_clear(), NOW)
+        self.assertTrue(decision.allowed)
+
+
+class TestReplacementIsSafe(unittest.TestCase):
+    def test_replacement_drops_the_old_destination(self):
+        """The old target is exactly what we're trying to stop."""
+        decision = check_command(good_order(target=Pose(z=45.0)), all_clear(), NOW)
+        self.assertIsNone(decision.command.target)
+
+    def test_replacement_comes_from_safety(self):
+        decision = check_command(good_order(target=Pose(z=45.0)), all_clear(), NOW)
+        self.assertEqual(decision.command.source, "safety")
+        self.assertNotEqual(decision.command.command_id, "cmd-1")
+
+    def test_replacement_is_well_formed(self):
+        """Motion must accept our replacement, or the drone keeps going."""
+        decision = check_command(good_order(target=Pose(z=45.0)), all_clear(), NOW)
+        self.assertIsNone(decision.command.validate())
 
 
 class TestPermissionsAreRespected(unittest.TestCase):
     def test_tracking_order_blocked_when_tracking_is_not_allowed(self):
         low_battery = assess(snapshot(battery={"percent": 15.0}), NOW)
-        decision = check_command(good_order(kind="track"), low_battery, NOW)
+        decision = check_command(good_order(), low_battery, NOW)
         self.assertFalse(decision.allowed)
-        self.assertIn("action_not_permitted", decision.reasons)
+        self.assertIn(ACTION_NOT_PERMITTED, decision.reasons)
 
     def test_unknown_order_kind_is_refused(self):
         decision = check_command(good_order(kind="do_a_backflip"), all_clear(), NOW)
-        self.assertIn("unknown_command_kind", decision.reasons)
+        self.assertFalse(decision.allowed)
 
 
 class TestCartMovingDuringDescent(unittest.TestCase):
-    """The scenario Section 11 calls out by name."""
+    """The scenario the integration plan calls out by name."""
 
     def test_cart_starts_moving_while_coming_down(self):
-        # The drone is descending onto the pad, then the cart starts rolling.
         moving = assess(snapshot(environment={"cart_moving": True}), NOW)
-        descending = good_order(kind="descend", z_m=2.0, vertical_speed_mps=1.0)
+        descending = good_order(
+            kind=MotionCommandType.DESCEND_TO_DOCK,
+            mission_state="DOCKING_APPROACH",
+            target=Pose(x=0.0, y=0.0, z=0.0),
+        )
         decision = check_command(descending, moving, NOW)
 
-        # The descent order must be swapped out in this same tick.
+        # The descent must be swapped out in this same tick.
         self.assertFalse(decision.allowed)
-        self.assertNotEqual(decision.command.kind, "descend")
-        self.assertEqual(decision.command.vertical_speed_mps, 0.0)
-        self.assertIn("action_not_permitted", decision.reasons)
+        self.assertEqual(decision.command.kind, MotionCommandType.HOVER)
+        self.assertIn(ACTION_NOT_PERMITTED, decision.reasons)
 
 
 class TestEmergency(unittest.TestCase):
     def test_emergency_replaces_any_order_with_landing(self):
-        dying_battery = assess(snapshot(battery={"percent": 4.0}), NOW)
-        decision = check_command(good_order(), dying_battery, NOW)
+        dying = assess(snapshot(battery={"percent": 4.0}), NOW)
+        decision = check_command(good_order(), dying, NOW)
         self.assertFalse(decision.allowed)
-        self.assertEqual(decision.command.kind, "emergency_land")
-        self.assertIn("emergency", decision.reasons)
+        self.assertEqual(decision.command.kind, MotionCommandType.EMERGENCY_LAND)
+        self.assertIn(EMERGENCY, decision.reasons)
 
-    def test_emergency_beats_an_otherwise_fine_order(self):
-        """Even a perfect order gets replaced during an emergency."""
+    def test_emergency_keeps_the_underlying_reasons(self):
         no_signal = assess(snapshot(environment={"comm_ok": False}), NOW)
-        decision = check_command(good_order(kind="hold"), no_signal, NOW)
-        self.assertEqual(decision.command.kind, "emergency_land")
+        decision = check_command(good_order(), no_signal, NOW)
+        self.assertIn("comm_loss", decision.reasons)
+
+    def test_emergency_landing_order_is_well_formed(self):
+        dying = assess(snapshot(battery={"percent": 4.0}), NOW)
+        decision = check_command(good_order(), dying, NOW)
+        self.assertIsNone(decision.command.validate())
 
 
 class TestSeveralProblemsAtOnce(unittest.TestCase):
     def test_every_problem_is_listed(self):
-        bad = good_order(x_m=300.0, z_m=50.0, horizontal_speed_mps=12.0)
+        bad = good_order(target=Pose(x=300.0, y=0.0, z=50.0), expires_ns=NOW - 1)
         decision = check_command(bad, all_clear(), NOW)
-        self.assertIn("geofence_breach", decision.reasons)
-        self.assertIn("altitude_ceiling", decision.reasons)
-        self.assertIn("horizontal_speed_limit", decision.reasons)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertIn(GEOFENCE_BREACH, decision.reasons)
+        self.assertIn(ALTITUDE_CEILING, decision.reasons)
+        self.assertIn(Reason.COMMAND_EXPIRED, decision.reasons)
