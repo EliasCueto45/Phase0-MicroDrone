@@ -1,17 +1,28 @@
 """The second safety check: looking at one actual order.
 
-The first check (safety_policy.py) answers "is tracking allowed right now?"
+The first check (safety_policy.py) answers "is descending allowed right now?"
 This one answers "is THIS specific order safe to send?" -- for example,
-"fly to 200 metres east at 40 metres up, going 9 m/s".
+"fly to 200 metres east, 40 metres up, at 9 m/s".
 
-The team's plan (Section 3, step 7) says safety must not just say no. If an
-order is unsafe we hand back a SAFE REPLACEMENT order, because doing nothing
-would leave the drone chasing its old target.
+If an order is unsafe we hand back a SAFE REPLACEMENT, never a bare "no".
+The integration plan is explicit about this: simply not sending a command
+would leave the drone chasing whatever target it already had.
+
+Order shape comes from Motion's shared contract, so Safety and Motion agree
+on field names. That file is expected to move to state_machine/contracts.py
+later; only the import below should need changing.
 """
 
-import math
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
+
+from motion_engine.contracts import (
+    LIFECYCLE_KINDS,
+    Command,
+    MotionCommandType,
+    Pose,
+    Reason,
+)
 
 from safety_layer import config
 from safety_layer.safety_policy import SafetyAssessment
@@ -19,43 +30,36 @@ from safety_layer.safety_policy import SafetyAssessment
 
 # Which order needs which permission from the first check.
 KIND_TO_ACTION = {
-    "takeoff": "launch",
-    "track": "tracking",
-    "dock_approach": "approach",
-    "descend": "descent",
-    "hover": "hold",
-    "hold": "hold",
-    "land": "hold",            # landing is how we stop; the hold rules cover it
-    "emergency_land": "hold",
-    "arm": "launch",
-    "disarm": "hold",
+    MotionCommandType.ARM: "launch",
+    MotionCommandType.TAKEOFF: "launch",
+    MotionCommandType.MOVE_TO: "tracking",
+    MotionCommandType.TRACK_TARGET: "tracking",
+    MotionCommandType.SET_YAW: "tracking",
+    MotionCommandType.GOTO_DOCK_APPROACH: "approach",
+    MotionCommandType.DESCEND_TO_DOCK: "descent",
+    MotionCommandType.HOVER: "hold",
+    MotionCommandType.STOP: "hold",
+    MotionCommandType.LAND: "hold",
+    MotionCommandType.DISARM: "hold",
+    MotionCommandType.EMERGENCY_LAND: "hold",
 }
 
-
-@dataclass(frozen=True)
-class Command:
-    """One order for the drone."""
-
-    command_id: str
-    kind: str                           # "takeoff", "track", "descend", ...
-    x_m: float = 0.0                    # east
-    y_m: float = 0.0                    # north
-    z_m: float = 0.0                    # up
-    horizontal_speed_mps: float = 0.0
-    vertical_speed_mps: float = 0.0
-    yaw_rate_dps: float = 0.0
-    issued_ns: int = 0                  # when it was created
-    source: str = "unknown"             # who asked for it
-    reason: Optional[str] = None
+# Safety's own reason codes, for problems Motion's list doesn't name.
+GEOFENCE_BREACH = "geofence_breach"
+ALTITUDE_CEILING = "altitude_ceiling"
+SPEED_LIMIT = "speed_limit"
+ACTION_NOT_PERMITTED = "action_not_permitted"
+EMERGENCY = "emergency"
+UNDERGROUND_TARGET = "underground_target"
 
 
 @dataclass(frozen=True)
 class CommandDecision:
     """Safety's answer about one order."""
 
-    allowed: bool                       # True = send the order as-is
-    command: Command                    # the order to send (original or replacement)
-    reasons: Tuple[str, ...] = ()       # short words explaining any problem
+    allowed: bool                   # True = send the order unchanged
+    command: Command                # the order to send (original or replacement)
+    reasons: Tuple[str, ...] = ()   # short codes explaining any problem
     timestamp_ns: int = 0
 
     @property
@@ -64,35 +68,80 @@ class CommandDecision:
         return not self.allowed
 
 
-def _hold_command(original: Command, now_ns: int) -> Command:
-    """A safe 'stop and stay put' order to use instead of a bad one."""
+def _safety_command(
+    original: Command, kind: MotionCommandType, now_ns: int, reason: str
+) -> Command:
+    """Build a replacement order from Safety.
+
+    HOVER and EMERGENCY_LAND both act where the drone currently is, so we
+    deliberately drop the original target instead of reusing it: the old
+    destination is exactly what we're trying to stop.
+    """
     return replace(
         original,
-        command_id=f"{original.command_id}-safety-hold",
-        kind="hold",
-        horizontal_speed_mps=0.0,
-        vertical_speed_mps=0.0,
-        yaw_rate_dps=0.0,
+        command_id=f"{original.command_id}-safety",
+        kind=kind,
+        target=None,
         issued_ns=now_ns,
+        expires_ns=None if kind in LIFECYCLE_KINDS else now_ns + _validity_ns(),
         source="safety",
-        reason="safety_hold",
+        reason=reason,
+        max_horizontal_speed_mps=None,
+        max_vertical_speed_mps=None,
     )
 
 
-def _land_command(original: Command, now_ns: int) -> Command:
-    """An emergency 'come down right here' order."""
-    return replace(
-        original,
-        command_id=f"{original.command_id}-safety-land",
-        kind="emergency_land",
-        z_m=0.0,
-        horizontal_speed_mps=0.0,
-        vertical_speed_mps=config.MAX_VERTICAL_SPEED_MPS,
-        yaw_rate_dps=0.0,
-        issued_ns=now_ns,
-        source="safety",
-        reason="emergency_land",
-    )
+def _validity_ns() -> int:
+    """How long an order stays good, in nanoseconds."""
+    return int(config.COMMAND_VALIDITY_S * config.NS_PER_S)
+
+
+def _expired(command: Command, now_ns: int) -> bool:
+    """Has this order gone stale?
+
+    Takeoff, land and the other lifecycle orders may carry no expiry at all,
+    so for those we measure age from when they were issued instead.
+    """
+    if command.expires_ns is not None:
+        return now_ns >= command.expires_ns
+    return now_ns - command.issued_ns > _validity_ns()
+
+
+def _outside_limits(target: Optional[Pose]) -> Tuple[str, ...]:
+    """Check a destination against the fence and the height limits."""
+    if target is None:
+        return ()
+
+    problems = []
+
+    # Distance from the pad, which sits at (0, 0).
+    distance = (target.x ** 2 + target.y ** 2) ** 0.5
+    if distance > config.GEOFENCE_RADIUS_M:
+        problems.append(GEOFENCE_BREACH)
+
+    if target.z > config.ALTITUDE_CEILING_M:
+        problems.append(ALTITUDE_CEILING)
+
+    # Below ground is never a real destination.
+    if target.z < 0.0:
+        problems.append(UNDERGROUND_TARGET)
+
+    return tuple(problems)
+
+
+def _speed_caps_ok(command: Command) -> bool:
+    """Speed caps may only lower our limits, never raise them.
+
+    Motion's contract says the same, so a command asking to go faster than
+    the configured limit is malformed, not just unsafe.
+    """
+    horizontal = command.max_horizontal_speed_mps
+    vertical = command.max_vertical_speed_mps
+    if horizontal is not None and horizontal > config.MAX_HORIZONTAL_SPEED_MPS:
+        return False
+    if vertical is not None and vertical > config.MAX_VERTICAL_SPEED_MPS:
+        return False
+    return True
 
 
 def check_command(
@@ -100,56 +149,65 @@ def check_command(
 ) -> CommandDecision:
     """Check one order and return it, or a safe replacement.
 
-    command:    the order someone wants to send
-    assessment: what the first safety check already decided this tick
-    now_ns:     the current pretend time
+    command:    the order the coordinator wants to send
+    assessment: what the first safety check decided this tick
+    now_ns:     the current simulation time
     """
-    problems = []
-
-    # 1. An emergency beats everything: come down now.
+    # 1. An emergency beats everything: come down here, now.
     if assessment.emergency:
         return CommandDecision(
             allowed=False,
-            command=_land_command(command, now_ns),
-            reasons=("emergency",) + assessment.reasons,
+            command=_safety_command(
+                command, MotionCommandType.EMERGENCY_LAND, now_ns, Reason.ACCEPTED
+            ),
+            reasons=(EMERGENCY,) + assessment.reasons,
             timestamp_ns=now_ns,
         )
 
-    # 2. Is the order too old? Orders only last a fifth of a second, so a
-    #    stale one might be based on information that has since changed.
-    age_ns = now_ns - command.issued_ns
-    if age_ns > config.COMMAND_VALIDITY_S * config.NS_PER_S or age_ns < 0:
-        problems.append("command_expired")
+    problems = []
 
-    # 3. Is this kind of action even allowed right now?
-    action = KIND_TO_ACTION.get(command.kind)
-    if action is None:
-        problems.append("unknown_command_kind")
-    elif not assessment.allows(action):
-        problems.append("action_not_permitted")
+    # 2. Is the order itself well formed? Motion's own check covers schema,
+    #    frame, missing targets and bad numbers, so we reuse it.
+    malformed = command.validate()
+    if malformed is not None:
+        problems.append(malformed)
 
-    # 4. Is the destination inside the invisible fence?
-    distance_from_pad = math.hypot(command.x_m, command.y_m)
-    if distance_from_pad > config.GEOFENCE_RADIUS_M:
-        problems.append("geofence_breach")
+    # 3. Has it gone stale?
+    if _expired(command, now_ns):
+        problems.append(Reason.COMMAND_EXPIRED)
 
-    # 5. Is it trying to fly too high?
-    if command.z_m > config.ALTITUDE_CEILING_M:
-        problems.append("altitude_ceiling")
+    # 4. Is this kind of action allowed right now?
+    try:
+        kind = MotionCommandType(command.kind)
+    except ValueError:
+        kind = None
+        problems.append(Reason.UNSUPPORTED_KIND)
 
-    # 6. Is it going too fast?
-    if command.horizontal_speed_mps > config.MAX_HORIZONTAL_SPEED_MPS:
-        problems.append("horizontal_speed_limit")
-    if command.vertical_speed_mps > config.MAX_VERTICAL_SPEED_MPS:
-        problems.append("vertical_speed_limit")
-    if command.yaw_rate_dps > config.MAX_YAW_RATE_DPS:
-        problems.append("yaw_rate_limit")
+    if kind is not None:
+        action = KIND_TO_ACTION.get(kind)
+        if action is None:
+            problems.append(Reason.UNSUPPORTED_KIND)
+        elif not assessment.allows(action):
+            problems.append(ACTION_NOT_PERMITTED)
 
-    # Anything wrong? Send a "stop and stay put" order instead.
+    # 5. Is the destination inside our limits?
+    problems.extend(_outside_limits(command.target))
+
+    # 6. Are the speed caps sane?
+    if not _speed_caps_ok(command):
+        problems.append(SPEED_LIMIT)
+
     if problems:
+        # Hovering is how the drone stops. If even holding isn't permitted,
+        # something is badly wrong, so come down instead.
+        fallback = (
+            MotionCommandType.HOVER
+            if assessment.allows("hold")
+            else MotionCommandType.LAND
+        )
         return CommandDecision(
             allowed=False,
-            command=_hold_command(command, now_ns),
+            command=_safety_command(command, fallback, now_ns, Reason.ACCEPTED),
             reasons=tuple(dict.fromkeys(problems)),
             timestamp_ns=now_ns,
         )
