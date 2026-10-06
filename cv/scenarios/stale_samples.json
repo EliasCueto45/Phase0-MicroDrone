@@ -1,0 +1,6 @@
+{
+  "scenario_id": "stale_samples", "fps": 1, "loop": false, "appearance": "bird",
+  "segments": [
+    {"frames": 3, "camera_ok": true, "bird": {"detected": true, "type": "fixture_bird", "distance_m": 30}}
+  ]
+}

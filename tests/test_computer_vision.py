@@ -186,6 +186,108 @@ class ComputerVisionTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             cv.read()
 
+    def test_scheduled_15hz_samples_in_10hz_loop(self):
+        self.scenario["fps"] = 15
+        cv = self.start(timestamp_mapper=lambda t: t)
+        observations = [cv.read_due(t) for t in (0, 100_000_000, 200_000_000)]
+        self.assertEqual([o.frame_index for o in observations], [0, 1, 3])
+        self.assertEqual(observations[1].timestamp_ns, 66_666_667)
+        records = [r for r in self.records if r["Details"]["event"] == "observation"]
+        self.assertEqual([r["Details"]["frame_index"] for r in records], [0, 1, 2, 3])
+
+    def test_cached_sample_can_be_stale_without_refreshing_timestamp(self):
+        self.scenario["fps"] = 1
+        cv = self.start(timestamp_mapper=lambda t: t)
+        first = cv.read_due(0)
+        count = len(self.records)
+        self.assertIs(cv.read_due(600_000_000), first)
+        self.assertEqual(first.to_bird_snapshot()["timestamp_ns"], 0)
+        self.assertEqual(len(self.records), count)
+
+    def test_offset_wait_and_snapshot_distinguish_absence_from_missing(self):
+        cv = self.start(timestamp_mapper=lambda t: t + 1_000_000_000)
+        self.assertIsNone(cv.read_due(0))
+        present = cv.read_due(1_000_000_000).to_bird_snapshot()
+        self.assertEqual(present["timestamp_ns"], 1_000_000_000)
+        self.assertEqual(present["source_timestamp_ns"], 0)
+        self.assertEqual(present["source_id"], "test")
+        absent = cv.read_due(1_100_000_000).to_bird_snapshot()
+        missing = cv.read_due(1_200_000_000).to_bird_snapshot()
+        self.assertIs(absent["detected"], False)
+        self.assertIs(absent["valid"], True)
+        self.assertIsNone(missing["detected"])
+        self.assertIs(missing["valid"], False)
+        self.assertEqual(missing["reason"], "missing_frame")
+        present["detected"] = False
+        self.assertIsNone(cv.read_due(1_200_000_000).detected)
+
+    def test_scheduled_exhaustion_is_stable_and_restart_is_explicit(self):
+        self.scenario["loop"] = False
+        cv = self.start(timestamp_mapper=lambda t: t)
+        self.assertEqual(cv.read_due(200_000_000).frame_index, 2)
+        for now in (300_000_000, 400_000_000):
+            with self.assertRaises(StopIteration):
+                cv.read_due(now)
+        self.assertTrue(cv.exhausted)
+        self.assertIsNone(cv.frame)
+        events = [r["Details"]["event"] for r in self.records]
+        self.assertEqual(events.count("source_exhausted"), 1)
+        cv.start_camera(self.path)
+        self.assertFalse(cv.exhausted)
+        self.assertEqual(cv.read_due(0).frame_index, 0)
+
+    def test_scheduling_rejects_bad_clock_and_mixed_read_modes(self):
+        cv = self.start(timestamp_mapper=lambda t: t)
+        for invalid in (True, -1, 0.5, "0"):
+            with self.assertRaises(ValueError):
+                cv.read_due(invalid)
+        cv.read_due(100_000_000)
+        with self.assertRaises(ValueError):
+            cv.read_due(0)
+        with self.assertRaises(RuntimeError):
+            cv.read()
+        cv.stop_camera()
+        cv.start_camera(self.path)
+        cv.read()
+        with self.assertRaises(RuntimeError):
+            cv.read_due(0)
+
+    def test_mapping_required_for_snapshot_and_scheduling(self):
+        cv = self.start()
+        with self.assertRaises(ValueError):
+            cv.read_due(0)
+        with self.assertRaises(ValueError):
+            cv.read().to_bird_snapshot()
+
+    def test_non_increasing_mapping_is_rejected(self):
+        cv = self.start(timestamp_mapper=lambda t: 0)
+        with self.assertRaises(ValueError):
+            cv.read_due(0)
+
+    def test_fixture_trace_is_reproducible_and_covers_absence_and_failure(self):
+        path = Path(__file__).resolve().parents[1] / "cv/scenarios/integration_cycle.json"
+        def replay():
+            records = []
+            cv = ComputerVision(timestamp_mapper=lambda t: t, log_sink=records.append)
+            cv.start_camera(path)
+            trace = [cv.read_due(t * 100_000_000).to_bird_snapshot() for t in range(130)]
+            with self.assertRaises(StopIteration):
+                cv.read_due(13_000_000_000)
+            return trace, records
+        first = replay()
+        self.assertEqual(first, replay())
+        trace = first[0]
+        self.assertIs(trace[10]["detected"], True)
+        self.assertIs(trace[50]["detected"], False)
+        self.assertIs(trace[60]["detected"], True)
+        self.assertTrue(all(row["detected"] is False for row in trace[80:120]))
+        self.assertIsNone(trace[120]["detected"])
+
+    def test_malformed_boolean_fixture_is_rejected_at_start(self):
+        self.scenario["segments"][0]["camera_ok"] = "true"
+        with self.assertRaises(ValueError):
+            self.start()
+
 
 if __name__ == "__main__":
     unittest.main()
