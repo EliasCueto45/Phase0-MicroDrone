@@ -1,5 +1,6 @@
 import pytest
 
+from state_machine.demos import DEMOS
 from state_machine.run_loop import run_world
 from state_machine.state_machine import step, State
 
@@ -165,7 +166,48 @@ def test_abort_stays_when_hold_not_permitted():
 def test_emergency_land_is_final():
     assert step(State.EMERGENCY_LAND, make_observation())[0] == State.EMERGENCY_LAND
 
-def test_demo_runs_full_cycle():
-    states = [new for _, _, new, _ in run_world(10000)]
-    assert states == [State.HOVERING, State.TRACKING, State.HOVERING, State.DOCKING_INIT,
-                      State.DOCKING_APPROACH, State.DOCKED, State.IDLE]
+# What each demo in demos.py should do from start to finish:
+# - states:   every state the mission passes through after IDLE, in order
+# - commands: every new command sent to Motion, in order (a renewed command counts once)
+# - grounded / armed: where the drone is when the run ends
+EXPECTED_DEMOS = {
+    "full_cycle": {
+        "states": [State.HOVERING, State.TRACKING, State.HOVERING, State.DOCKING_INIT,
+                   State.DOCKING_APPROACH, State.DOCKED, State.IDLE],
+        "commands": ["ARM", "TAKEOFF", "HOVER", "DESCEND_TO_DOCK", "DISARM"],
+        "grounded": True, "armed": False,
+    },
+    "docking_retry": {
+        "states": [State.HOVERING, State.TRACKING, State.DOCKING_INIT, State.DOCKING_APPROACH, State.ABORT,
+                   State.DOCKING_INIT, State.DOCKING_APPROACH, State.DOCKED, State.IDLE],
+        "commands": ["ARM", "TAKEOFF", "HOVER", "DESCEND_TO_DOCK", "STOP", "HOVER", "DESCEND_TO_DOCK", "DISARM"],
+        "grounded": True, "armed": False,
+    },
+    "emergency": {
+        "states": [State.HOVERING, State.TRACKING, State.EMERGENCY_LAND],
+        "commands": ["ARM", "TAKEOFF", "EMERGENCY_LAND"],
+        "grounded": True, "armed": False,  # the emergency landing disarms on touchdown
+    },
+    "blocked_dock": {
+        "states": [State.HOVERING, State.TRACKING, State.DOCKING_INIT],
+        "commands": ["ARM", "TAKEOFF", "HOVER"],
+        "grounded": False, "armed": True,  # still hovering, waiting for the dock to clear
+    },
+}
+
+@pytest.mark.parametrize("name", sorted(DEMOS))
+def test_demo_end_to_end(name):
+    scenario, duration_ms = DEMOS[name]
+    expected = EXPECTED_DEMOS[name]
+    result = run_world(duration_ms, scenario=scenario)
+
+    states = [new for _, _, new, _ in result["transitions"]]
+    assert states == expected["states"]
+
+    # Motion accepted every command, and they were sent in this order
+    assert all(accepted for _, _, accepted, _ in result["commands"]), result["commands"]
+    assert [kind for _, kind, _, _ in result["commands"]] == expected["commands"]
+
+    vehicle = result["vehicle"]
+    assert vehicle.grounded == expected["grounded"]
+    assert vehicle.armed == expected["armed"]
