@@ -169,8 +169,6 @@ def run_world(duration_ms: int, real_time: bool = False, log_transitions: bool =
 
         # 3. Only log real transitions
         if newState != currState:
-            # print(f"({current_time_ms}ms) {currState.value} -> {newState.value}: Reason: {reason}")
-
             if log_transitions:
                 UniversalLog({
                                 "State": newState.value,
