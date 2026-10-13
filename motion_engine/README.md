@@ -93,6 +93,53 @@ py -3 motion_engine/synthetic/generate_motion_data.py      # synthetic CSVs, see
 and descent, cancellation, ordinary disarm, emergency-latch interaction,
 expiry and renewal, rejected input, and identical traces from identical inputs.
 
+### Failure injection
+
+```bash
+py -3 -m pytest motion_engine/tests/test_failure_injection.py -v
+```
+
+Injects the START_HERE "definition of done" failures into a running stub and
+checks Motion's outcome for each:
+
+| Section | Failures injected | Outcome checked |
+|---|---|---|
+| A. Command loss | renewals stop mid-move/track/approach/yaw/descent; one dropped renewal; late renewal after expiry; lifecycle and emergency commands with no renewal | holds within one 0.2 s validity window and never moves again; one dropped tick is tolerated; an expired ID cannot be revived; takeoff/land/emergency still complete |
+| B. Loop stalls / clock | 1-5 s coordinator stall (incl. one 5 s `dt`); clock running backwards | expires *before* moving; a backwards clock cannot revive a target |
+| C. Stale / replayed | late already-expired command; replayed old ID; same ID with a new target | rejected with a stable reason, current target keeps flying |
+| D. Geofence | bird walking out of the fence; ceiling and fence edges; out-of-limit target through Safety | never leaves the fence; Safety's hold applies before that tick's movement |
+| E. Emergency | `EMERGENCY_LAND` during climb, tracking, approach, descent, hover; on the pad; disarmed | descends in place at 1 m/s, latches, auto-disarms |
+| F. Safety hazards | cart moving during descent; hold forbidden; low battery; critical battery mid-approach | descent frozen that tick and resumed under a new ID; lands in place; return still allowed; emergency beats docking |
+| G. Garbage input | 19 kinds of malformed command submitted every tick | the flown path is identical to a clean run |
+| H. Not a landing | link lost 0.2 m above the pad (inside arrival tolerance) | never `landing_settled`, disarm refused |
+| I. Bad `dt` | 0, negative, NaN, inf | NaN/inf are a **known bug**, pinned as strict `xfail` |
+
+Every scenario is recorded and run through the trace checker below, so no
+test can pass while breaking a speed, fence or latch rule along the way.
+
+### Trace checker
+
+[`trace_checker.py`](trace_checker.py) walks a whole run tick by tick and
+checks 15 rules from INTEGRATION_README §5/§8: finite pose, monotonic time,
+ground/ceiling/geofence, horizontal/vertical/yaw rate limits, no motion
+while disarmed, airborne/grounded flags, no landing above the ground,
+emergency descent in place at 1 m/s, latch release only on the ground, no
+motion after expiry, and that rejected commands never change the active
+command. It also reports path length, peak speeds, time airborne, landing
+error from the pad, and rejected commands by reason.
+
+```bash
+py -3 -m motion_engine.trace_checker --demo                          # record + check a nominal mission
+py -3 -m motion_engine.trace_checker --demo --save motion_engine/motion_logs/demo.jsonl
+py -3 -m motion_engine.trace_checker motion_engine/motion_logs/*.csv  # the synthetic CSVs (pose-only rules)
+py -3 -m motion_engine.trace_checker run.jsonl --json
+py -3 -m pytest motion_engine/tests/test_trace_checker.py
+```
+
+Exit code 0 = all clean, 1 = violations, 2 = unreadable file. Record your
+own run by wrapping the stub in `TraceRecorder` (example in the module
+docstring).
+
 ## Phase-1 (PX4) goals
 
 The original PX4 plan. It comes after the synthetic milestone above.
