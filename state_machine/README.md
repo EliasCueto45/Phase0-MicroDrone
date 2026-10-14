@@ -33,6 +33,7 @@ These names are part of the Phase 0 → Phase 1 interface contract and must not 
 - Input: the current state and one observation per tick (see the observation format below).
 - Output: the next state and a transition reason, written to the observation's `state` field and to the log.
 - The state machine reads Docking's `should_dock`, `reason`, `phase` and `landed_on_pad`; it does not re-evaluate docking triggers itself. Likewise, it reads the Safety layer's decisions (`permissions`, `emergency`, `abort` and `battery_recovered`) rather than re-deriving safety rules, so it never checks whether the dock is clear itself.
+- Those Safety decisions are worked out every tick by Safety's `assess()`, which `run_loop.py` calls before `step()` (see "Safety integration" below).
 
 Proposed interface:
 
@@ -44,18 +45,34 @@ next_state, reason = step(current_state, observation)
 
 ### Observation format (draft, to be agreed with all modules)
 
+What `step()` receives on one tick of the `full_cycle` demo (5000 ms: low battery, cart moving):
+
 ```json
 {
-  "timestamp": "...",
-  "bird":    { "type": "hawk", "distance_m": 32.5, "detected": true },
-  "battery": { "percent": 42, "low": false },
-  "safety":  { "permissions": { "launch": true, "tracking": true, "approach": true, "descent": true, "hold": true },
-               "emergency": false, "abort": false,
-               "battery_low": false, "battery_critical": false, "battery_recovered": true, "reasons": [] },
-  "docking": { "should_dock": false, "reason": null, "phase": "idle", "landed_on_pad": false },
-  "state":   "TRACKING"
+  "timestamp_ns": 5000000000,
+  "bird":        { "detected": false, "type": null, "distance_m": null },
+  "battery":     { "percent": 18, "valid": true, "timestamp_ns": 5000000000 },
+  "environment": { "people_nearby": false, "cart_moving": true, "weather": "clear",
+                   "camera_ok": true, "comm_ok": true, "valid": true, "timestamp_ns": 5000000000 },
+  "dock":        { "alignment_valid": true, "valid": true, "timestamp_ns": 5000000000 },
+  "vehicle":     { "armed": true, "airborne": true, "grounded": false, "pose": { "x": 0.0, "y": 0.0, "z": 5.0, "yaw_deg": 0.0 },
+                   "valid": true, "timestamp_ns": 4900000000, "...": "the rest of Motion's VehicleFeedback" },
+  "context":     { "flight_active": true },
+  "safety":      { "permissions": { "launch": false, "tracking": false, "approach": false, "descent": false, "hold": true },
+                   "emergency": false, "abort": false, "battery_low": true, "battery_critical": false,
+                   "battery_recovered": false, "reasons": ["low_battery", "cart_moving"], "timestamp_ns": 5000000000 },
+  "docking":     { "should_dock": true, "reason": "low_battery", "phase": "idle", "landed_on_pad": false }
 }
 ```
+
+| Section | Comes from |
+|---|---|
+| `bird`, `battery`, `environment`, `dock`, `docking` | The demo scenario (`demos.py`). `bird` will come from CV and `docking` from Docking once they are connected. |
+| `vehicle` | Motion's feedback from the previous tick (`VehicleFeedback.to_dict()`) |
+| `context` | `run_loop.py`: `flight_active` is true while the drone is armed or airborne |
+| `safety` | Safety's `assess()`, worked out from the sections above |
+
+`step()` reads `bird`, `safety` and `docking`. The other sections are what Safety needs to decide.
 
 ## Docking triggers
 
@@ -163,6 +180,17 @@ Part of Phase 0 Deliverable is what is needed for Phase 1.
 Be able to, in a running simulation, test each of these values changing.
 
 
+## Safety integration
+
+`run_loop.py` asks Safety what is allowed every tick, before `step()`:
+
+1. It builds the snapshot: the scenario's `battery`, `environment` and `dock` facts, each stamped with the current time; Motion's feedback as `vehicle`; and `context` with `flight_active`.
+2. It calls Safety's `assess(snapshot, now_ns)` ([`safety_layer/safety_policy.py`](../safety_layer/safety_policy.py)) and puts the answer in `snapshot["safety"]`, where `step()` reads it.
+
+Safety fails closed: a missing section, or one older than 0.5 s, counts as not permitted. Its emergency rules (critical battery, lost comms, bad weather, stale data) only apply while `flight_active` is true.
+
+Every command then passes through `check_for_motion()` ([`motion_engine/safety_adapter.py`](../motion_engine/safety_adapter.py)) before it reaches Motion. If Safety does not permit it, Safety sends a replacement instead: `HOVER`, `LAND` if holding is not permitted either, or `EMERGENCY_LAND` during an emergency. A replacement's command id ends in `-safety`.
+
 ## Motion integration
 
 `run_loop.py` drives Motion's simulated drone (`MotionStub`) from the mission state. `step()` still only decides the state; it never sends a command.
@@ -171,7 +199,7 @@ Each tick, after `step()`:
 
 1. On `IDLE → HOVERING`, `launch_drone()` sends `ARM` and `TAKEOFF` once.
 2. `wanted_command(state, vehicle)` picks the command for the current state (the last column of the States table), using Motion's feedback from the previous tick.
-3. `send_command()` sends it:
+3. `send_command()` sends it, after Safety's command check:
    - `HOVER`, `STOP` and `DESCEND_TO_DOCK` are valid for 0.2 s and are renewed every tick with the same command id. A different command gets a new id.
    - `DISARM` and `EMERGENCY_LAND` are sent once.
 4. `motion.step()` moves the drone by one tick, and `motion.feedback()` reads its new status.
@@ -180,11 +208,10 @@ Nothing is sent while the takeoff is still climbing, because a new command would
 
 Not connected yet:
 
-- Commands are not passed through Safety's command check ([`motion_engine/safety_adapter.py`](../motion_engine/safety_adapter.py)).
 - `DOCKING_APPROACH` descends straight to the pad. Docking's proposed target will replace this.
 - `TRACKING` sends no command, because there is no Navigation target yet.
-- A command that Motion rejects is printed, not handled.
-- Safety's and Docking's outputs are still scripted by the demo scenarios.
+- A command that Motion rejects is printed, not handled. `context` does not yet report it to Safety (`pending_command_failure`), and has no `operator_abort`.
+- Docking's outputs and the bird are still scripted by the demo scenarios.
 
 ## Running
 
@@ -192,7 +219,7 @@ Code lives in this folder:
 
 - `state_machine.py`: the `State` enum and `step()`.
 - `run_loop.py`: the 10 Hz synthetic loop. It runs a scripted demo through `step()` and sends the matching commands to Motion.
-- `demos.py`: the scripted demo scenarios.
+- `demos.py`: the scripted demo scenarios. They script facts about the world (battery, cart, people, comms, pad alignment), not Safety's answers.
 - `tests/`: unit tests for `step()`, and one end-to-end test per demo.
 
 Run a demo from the repo root:
@@ -207,8 +234,11 @@ It prints every state transition with its time and reason. With no name, it runs
 |---|---|
 | `full_cycle` | Launch for a bird, lose it, return on low battery, wait for the cart, land, recharge |
 | `docking_retry` | Docking fails on the first attempt; the mission aborts, retries and lands |
-| `emergency` | Safety raises an emergency while tracking; the drone lands in place |
-| `blocked_dock` | The dock stays blocked; the drone holds in `DOCKING_INIT` |
+| `emergency` | The battery drops to 8% while tracking; Safety raises an emergency and the drone lands in place |
+| `blocked_dock` | The cart keeps moving, so Safety never allows the approach; the drone holds in `DOCKING_INIT` |
+| `not_aligned` | The drone is not lined up with the pad; Safety replaces the descent with a hover until it is |
+| `cart_during_descent` | The cart starts moving mid-descent; the mission aborts, waits for the cart to stop, then lands |
+| `comm_loss` | Communication is lost while tracking; Safety raises an emergency and the drone lands in place |
 
 The command paces the run in real time, so a 10-second demo takes 10 seconds. It also writes the transitions to a new log file in `universal_log/`; do not commit those files.
 

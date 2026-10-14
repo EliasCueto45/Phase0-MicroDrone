@@ -193,6 +193,24 @@ EXPECTED_DEMOS = {
         "commands": ["ARM", "TAKEOFF", "HOVER"],
         "grounded": False, "armed": True,  # still hovering, waiting for the dock to clear
     },
+    "not_aligned": {
+        "states": [State.HOVERING, State.TRACKING, State.DOCKING_INIT, State.DOCKING_APPROACH,
+                   State.DOCKED, State.IDLE],
+        # The second HOVER is Safety's replacement for the descent, until the pad alignment is valid
+        "commands": ["ARM", "TAKEOFF", "HOVER", "HOVER", "DESCEND_TO_DOCK", "DISARM"],
+        "grounded": True, "armed": False,
+    },
+    "cart_during_descent": {
+        "states": [State.HOVERING, State.TRACKING, State.DOCKING_INIT, State.DOCKING_APPROACH, State.ABORT,
+                   State.DOCKING_INIT, State.DOCKING_APPROACH, State.DOCKED, State.IDLE],
+        "commands": ["ARM", "TAKEOFF", "HOVER", "DESCEND_TO_DOCK", "STOP", "HOVER", "DESCEND_TO_DOCK", "DISARM"],
+        "grounded": True, "armed": False,
+    },
+    "comm_loss": {
+        "states": [State.HOVERING, State.TRACKING, State.EMERGENCY_LAND],
+        "commands": ["ARM", "TAKEOFF", "EMERGENCY_LAND"],
+        "grounded": True, "armed": False,  # the emergency landing disarms on touchdown
+    },
 }
 
 @pytest.mark.parametrize("name", sorted(DEMOS))
@@ -211,3 +229,17 @@ def test_demo_end_to_end(name):
     vehicle = result["vehicle"]
     assert vehicle.grounded == expected["grounded"]
     assert vehicle.armed == expected["armed"]
+
+def test_safety_holds_descent_until_aligned():
+    # Safety swaps the descent for a hover until the pad alignment becomes valid at 5000 ms
+    scenario, duration_ms = DEMOS["not_aligned"]
+    commands = run_world(duration_ms, scenario=scenario)["commands"]
+    descents = [time_ms for time_ms, kind, _, _ in commands if kind == "DESCEND_TO_DOCK"]
+    assert descents == [5000]
+
+def test_cart_moving_stops_descent_on_the_same_tick():
+    # The cart starts moving at 4000 ms; the descent is replaced by STOP in that same tick,
+    # before Motion moves the drone (INTEGRATION_README.md section 11)
+    scenario, duration_ms = DEMOS["cart_during_descent"]
+    commands = run_world(duration_ms, scenario=scenario)["commands"]
+    assert (4000, "STOP") in [(time_ms, kind) for time_ms, kind, _, _ in commands]
