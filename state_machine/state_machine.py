@@ -3,6 +3,7 @@
 
 from enum import Enum
 
+
 class State(Enum):
     IDLE = "IDLE"
     TRACKING = "TRACKING"

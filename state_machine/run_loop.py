@@ -3,6 +3,7 @@ import copy
 import time
 
 from state_machine.state_machine import State, step
+from universal_log.Universal_log import UniversalLog
 
 TICK_HZ = 10
 TICK_MS = 1000 // TICK_HZ  # 100 ms per tick
@@ -48,7 +49,7 @@ def init_world() -> dict:
     }
 
 
-def run_world(duration_ms: int, real_time: bool = False): 
+def run_world(duration_ms: int, real_time: bool = False, log_transitions: bool = False): 
     world = init_world()
     currState = State.IDLE
     transitions = []
@@ -68,6 +69,17 @@ def run_world(duration_ms: int, real_time: bool = False):
 
         # 3. Only log real transitions
         if newState != currState:
+            if log_transitions:
+                UniversalLog({
+                                "State": newState.value,
+                                "Details": {
+                                    "module": "state_machine",
+                                    "timestamp": current_time_ms,
+                                    "reason": reason,
+                                    "from": currState.value,
+                                    "to": newState.value
+                                }
+                            }, True)
             transitions.append((current_time_ms, currState, newState, reason))
             currState = newState
         if real_time:
@@ -75,6 +87,6 @@ def run_world(duration_ms: int, real_time: bool = False):
     return transitions
     
 if __name__ == "__main__":
-    transitions = run_world(10000, False)  # Run the simulation for 10 seconds (10000 ms)
+    transitions = run_world(10000, False, True)  # Run the simulation for 10 seconds (10000 ms)
     for currentTimeMs, currState, newState, reason in transitions:
         print(f"({currentTimeMs}ms) {currState.value} -> {newState.value}: Reason: {reason}")

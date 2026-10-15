@@ -60,15 +60,32 @@ Limits default to the INTEGRATION_README §5 table (`MotionLimits`): 5 / 2 m/s,
 emergency descent. Pass the same `MotionLimits` that Safety uses.
 
 Logging goes through any object with the agreed
-`log(module, event, *, fields, state, truth, decision, t)` method. The shared
-logger is planned for `state_machine/logging_format.py`; until it exists,
-`contracts.MemoryLogSink` is an in-memory stand-in. Motion no longer imports
-the old `mission.logging_format`.
+`log(module, event, *, fields, state, truth, decision, t)` method
+(`contracts.LogSink`). To write into the shared logger in
+[`universal_log/Universal_log.py`](../universal_log/Universal_log.py), the same
+one CV uses, pass `UniversalLogSink` from
+[`universal_logging.py`](universal_logging.py):
+
+```python
+from motion_engine.universal_logging import UniversalLogSink
+
+motion = MotionStub(logger=UniversalLogSink(), clock=clock)
+motion.set_log_context(state=state.value)   # coordinator, every tick
+```
+
+Each record becomes `State` = the coordinator's mission state (`IDLE` until
+one is set, as in CV) and `Details` = `module`, `event`, `t`, `fields`,
+`synthetic_truth`, `decision` (the same keys as `LogEntry.to_dict()`).
+UniversalLog's outer timestamp is wall-clock emission time; Motion's clock
+reading stays in `Details["t"]` and is the one to use for ordering. CV and
+Motion records land in the same `universal_log/logged_states_<run>.log`.
+`contracts.MemoryLogSink` remains the in-memory sink for tests. Motion no
+longer imports the old `mission.logging_format`.
 
 ### Runnable checks
 
 ```bash
-py -3 -m pytest motion_engine/tests/test_motion_stubs.py motion_engine/tests/test_motion_contract.py
+py -3 -m pytest motion_engine/tests/test_motion_stubs.py motion_engine/tests/test_motion_contract.py motion_engine/tests/test_universal_logging.py
 py -3 motion_engine/synthetic/generate_motion_data.py      # synthetic CSVs, see synthetic/README.md
 ```
 
