@@ -10,23 +10,23 @@ Phase 0 is purely synthetic: all inputs are generated values, not sensor or simu
 
 ## States
 
-| State | Where | Meaning | Motion action (proposed) |
+| State | Where | Meaning | Motion command sent by `run_loop.py` |
 |---|---|---|---|
-| `IDLE` | On the dock | On the dock or grounded, waiting for a reason to launch | None (disarmed) |
-| `TRACKING` | Air | Airborne and following a detected bird | `track_target()` every tick |
-| `HOVERING` | Launching from the dock, or air | Launching (arming and climbing), or airborne and holding position (bird lost, temporarily unsafe, or waiting to dock) | `arm()` + `takeoff()` when coming from `IDLE`, otherwise `hover()` |
-| `DOCKING_INIT` | Air | Docking requested; checking that the dock can be approached | `hover()` while waiting for approach permission |
-| `DOCKING_APPROACH` | Air → landing on the dock | Moving toward and descending onto the dock | `goto_dock_approach()`, then `descend_to_dock()` |
-| `DOCKED` | On the dock | Landed on the dock | `disarm()` |
-| `ABORT` | Air | Current action cancelled; deciding whether to recover or land | `stop()` (hold in place) |
-| `EMERGENCY_LAND` | Air → landing where it is | Synthetic only. Land immediately at the current position | `emergency_land()` |
+| `IDLE` | On the dock | On the dock or grounded, waiting for a reason to launch | None |
+| `TRACKING` | Air | Airborne and following a detected bird | None yet (needs a tracking target; Navigation has no code) |
+| `HOVERING` | Launching from the dock, or air | Launching (arming and climbing), or airborne and holding position (bird lost, temporarily unsafe, or waiting to dock) | `ARM` + `TAKEOFF` once when coming from `IDLE`; `HOVER` once the climb has finished |
+| `DOCKING_INIT` | Air | Docking requested; checking that the dock can be approached | `HOVER` while waiting for approach permission |
+| `DOCKING_APPROACH` | Air → landing on the dock | Moving toward and descending onto the dock | `DESCEND_TO_DOCK` to the pad (a shortcut until Docking proposes the target) |
+| `DOCKED` | On the dock | Landed on the dock | `DISARM`, once the drone is on the ground |
+| `ABORT` | Air | Current action cancelled; deciding whether to recover or land | `STOP` (hold in place) |
+| `EMERGENCY_LAND` | Air → landing where it is | Synthetic only. Land immediately at the current position | `EMERGENCY_LAND`, once |
 
 These names are part of the Phase 0 → Phase 1 interface contract and must not change without team agreement.
 
 - `IDLE` and `DOCKED` are both on the dock. `DOCKED` means just landed with the battery not yet recovered; it becomes `IDLE` once the battery has recovered.
 - There is no separate takeoff state: `HOVERING` includes the launch ([integration contract](../INTEGRATION_README.md) section 2). A launch goes `IDLE → HOVERING → TRACKING`. Holding `TRACKING` back until the climb finishes needs a launch-progress input that the team has not agreed yet.
 - In Phase 0, "the dock" is a stationary pad in simulation. The golf-cart dock is the long-term product (see [Start Here](../START_HERE.md)).
-- Motion actions are proposed and need agreement with the Motion team. Command names are from [`motion_engine/motion_stubs.py`](../motion_engine/motion_stubs.py). The state machine only chooses the state; the simulation loop issues the command.
+- The Motion command for each state is chosen by `wanted_command()` in `run_loop.py`. The mapping is a proposal and needs agreement with the Motion team. Command names are Motion's `MotionCommandType` ([`motion_engine/contracts.py`](../motion_engine/contracts.py)). The state machine only chooses the state; the loop issues the command.
 
 ## Inputs and outputs
 
@@ -52,7 +52,8 @@ next_state, reason = step(current_state, observation)
   "safety":  { "permissions": { "launch": true, "tracking": true, "approach": true, "descent": true, "hold": true },
                "emergency": false, "abort": false,
                "battery_low": false, "battery_critical": false, "battery_recovered": true, "reasons": [] },
-  "docking": { "should_dock": false, "reason": null, "phase": "idle", "landed_on_pad": false },  "state":   "TRACKING"
+  "docking": { "should_dock": false, "reason": null, "phase": "idle", "landed_on_pad": false },
+  "state":   "TRACKING"
 }
 ```
 
@@ -148,8 +149,6 @@ Every transition in the agreed table is covered by a passing test. Each docking 
 
 Phase 1 must implement the same states and respect them in motion control. Real observations replace synthetic ones through the same observation format; the transition logic should not need to change.
 
-Code lives in this folder: `state_machine.py`, with tests in `tests/`. Run the tests from the repo root with `python3 -m pytest state_machine -v`.
-
 Simulation loop:
 Pretend 3D coordinates
 CV: Feed birds into camera (Bird? Safetycheck & Dockcheck : Do nothing) Predefined states for images (Kind of bird, distance away) - Elias C
@@ -164,26 +163,65 @@ Part of Phase 0 Deliverable is what is needed for Phase 1.
 Be able to, in a running simulation, test each of these values changing.
 
 
+## Motion integration
+
+`run_loop.py` drives Motion's simulated drone (`MotionStub`) from the mission state. `step()` still only decides the state; it never sends a command.
+
+Each tick, after `step()`:
+
+1. On `IDLE → HOVERING`, `launch_drone()` sends `ARM` and `TAKEOFF` once.
+2. `wanted_command(state, vehicle)` picks the command for the current state (the last column of the States table), using Motion's feedback from the previous tick.
+3. `send_command()` sends it:
+   - `HOVER`, `STOP` and `DESCEND_TO_DOCK` are valid for 0.2 s and are renewed every tick with the same command id. A different command gets a new id.
+   - `DISARM` and `EMERGENCY_LAND` are sent once.
+4. `motion.step()` moves the drone by one tick, and `motion.feedback()` reads its new status.
+
+Nothing is sent while the takeoff is still climbing, because a new command would replace the takeoff.
+
+Not connected yet:
+
+- Commands are not passed through Safety's command check ([`motion_engine/safety_adapter.py`](../motion_engine/safety_adapter.py)).
+- `DOCKING_APPROACH` descends straight to the pad. Docking's proposed target will replace this.
+- `TRACKING` sends no command, because there is no Navigation target yet.
+- A command that Motion rejects is printed, not handled.
+- Safety's and Docking's outputs are still scripted by the demo scenarios.
+
 ## Running
 
 Code lives in this folder:
 
 - `state_machine.py`: the `State` enum and `step()`.
-- `run_loop.py`: the 10 Hz synthetic loop, which runs a scripted demo scenario through `step()`.
-- `tests/`: unit tests for `step()` and the demo run.
+- `run_loop.py`: the 10 Hz synthetic loop. It runs a scripted demo through `step()` and sends the matching commands to Motion.
+- `demos.py`: the scripted demo scenarios.
+- `tests/`: unit tests for `step()`, and one end-to-end test per demo.
 
-Run from the repo root:
+Run a demo from the repo root:
 
 ```bash
-python3 -m state_machine.run_loop
+python3 -m state_machine.run_loop full_cycle
 ```
 
-Prints every state transition in the demo scenario, with its time and reason.
+It prints every state transition with its time and reason. With no name, it runs `full_cycle`.
+
+| Demo | What happens |
+|---|---|
+| `full_cycle` | Launch for a bird, lose it, return on low battery, wait for the cart, land, recharge |
+| `docking_retry` | Docking fails on the first attempt; the mission aborts, retries and lands |
+| `emergency` | Safety raises an emergency while tracking; the drone lands in place |
+| `blocked_dock` | The dock stays blocked; the drone holds in `DOCKING_INIT` |
+
+The command paces the run in real time, so a 10-second demo takes 10 seconds. It also writes the transitions to a new log file in `universal_log/`; do not commit those files.
+
+Run the tests:
 
 ```bash
 python3 -m pytest state_machine -v
 ```
 
-Runs the state machine tests.
+The tests call `run_world()` without real-time pacing or logging, so they finish immediately and write no files.
 
-The loop uses a simulation clock, so 10 simulated seconds finish almost instantly. Call `run_world(10000, real_time=True)` to pace it in real time instead.
+`run_world(duration_ms, scenario=...)` returns a dict:
+
+- `transitions`: `(time_ms, from_state, to_state, reason)` for each state change.
+- `commands`: `(time_ms, kind, accepted, reason)` for each new command sent to Motion. A renewed command is listed once.
+- `vehicle`: Motion's feedback after the last tick (`grounded`, `armed`, `airborne`, `pose`, …).
