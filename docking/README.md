@@ -74,7 +74,7 @@ coordinator's responsibility.
 | idle | None | Mission docking entry → approach |
 | approach | GOTO_DOCK_APPROACH at configured altitude over pad | At position/altitude/yaw tolerance → align if alignment fresh, otherwise search |
 | search | HOVER | Fresh valid alignment → align; search timeout → abort |
-| align | MOVE_TO correcting horizontal position/yaw at approach altitude | Within horizontal/yaw tolerance and descent allowed → descend; lost alignment → search |
+| align | GOTO_DOCK_APPROACH correcting horizontal position/yaw at approach altitude | Within horizontal/yaw tolerance and descent allowed → descend; lost alignment → search |
 | descend | DESCEND_TO_DOCK to pad at z = 0 | Confirmed pad touchdown → complete; lost alignment, drift, or lost descent permission → abort |
 | complete | No flight target; report landed_on_pad | Coordinator enters DOCKED and explicitly disarms |
 | abort | No docking target; report failure | Coordinator enters ABORT; Safety supplies fallback |
@@ -107,17 +107,33 @@ error within tolerance, stationary cart, and retained descent permission/alignme
 Arrival (`arrived`/`at_target`) or command acceptance alone cannot confirm landing.
 Emergency landing cannot produce ordinary docking completion.
 
-## Checks and remaining integration
+## Synthetic alignment and checks
+
+`docking.alignment.calculate_alignment` accepts `LocalPosition(x_m, y_m, origin_id,
+frame="local_enu", yaw_deg=...)` fixtures plus an integer `timestamp_ns`. Both
+positions require the same named origin. It returns signed x/y offsets, wrapped
+yaw error, horizontal distance, validity, source, and reason. Invalid/missing
+positions, nonfinite numbers, mismatched origins/frames, or invalid times yield
+unavailable alignment. Freshness is checked by the controller.
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_docking*.py' -v
+python3 -m docking.run_docking --scenario success --log /tmp/docking-success.jsonl
 ```
+
+`run_docking` is a module diagnostic replay of recorded inputs, not a second
+mission loop. It does not move Motion, dispatch targets, or decide mission state.
+Fixtures supply mission entry and recorded landing feedback. Other scenarios are
+`missing`, `stale`, `low-battery`, and `cart-moving`. Low battery allows completion;
+missing/stale alignment and cart motion abort descent. Logs include ENU,
+nanoseconds, controller inputs, proposals, and outcomes. Production logging uses
+the coordinator's shared logger; the diagnostic JSONL writer is for local checks.
+`--log` overwrites the given file; its parent directory must exist. Without it,
+records go to stdout. The outcome summary goes to stderr; a successfully replayed
+abort fixture exits with code 0.
 
 The tests cover phase transitions, blocked pads, yaw/horizontal drift, invalid or
 stale inputs, timeout boundaries, return triggers, retries/reset, and actual
-MotionStub feedback through touchdown followed by explicit disarming.
-
-The alignment and utils packages and `run_docking.py` remain placeholders.
-Callers supply explicit synthetic ENU alignment observations through `DockingInput`.
-Wiring these values into the central coordinator and running the full mission/retry
+MotionStub feedback through touchdown followed by explicit disarming. Wiring
+these values into the central coordinator and running the full mission/retry
 scenarios remains integration-team work.

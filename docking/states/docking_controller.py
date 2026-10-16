@@ -402,7 +402,9 @@ class DockingController:
             kind, pose = MotionCommandType.DESCEND_TO_DOCK, pad
         elif self.state == DockingState.ALIGN:
             vehicle = inputs.vehicle.pose
-            kind = MotionCommandType.MOVE_TO
+            # Alignment is a docking approach action, including on low battery
+            # when Safety deliberately disables ordinary tracking movement.
+            kind = MotionCommandType.GOTO_DOCK_APPROACH
             pose = Pose(vehicle.x + inputs.x_error_m, vehicle.y + inputs.y_error_m,
                         self.config.approach_altitude_m,
                         (vehicle.yaw_deg + inputs.yaw_error_deg) % 360)
