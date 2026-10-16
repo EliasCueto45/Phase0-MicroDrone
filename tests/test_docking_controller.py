@@ -7,6 +7,7 @@ from docking.states import (
 )
 from motion_engine.contracts import CommandStatus, MotionCommandType, Pose
 from motion_engine.motion_stubs import MotionStub
+from safety_layer.command_check import ACTION_NOT_PERMITTED, check_command
 from safety_layer.safety_policy import SafetyAssessment
 
 NS = 1_000_000_000
@@ -319,7 +320,30 @@ class DockingControllerTests(unittest.TestCase):
                 self.controller.update(fixture(), time)
             self.assertEqual(self.controller.state, DockingState.APPROACH)
 
-    def test_motion_feedback_end_to_end_confirms_landing_before_disarm(self):
+    def test_low_battery_alignment_uses_approach_permission(self):
+        inputs = fixture()
+        low = replace(inputs.safety, battery_low=True,
+                      permissions={**inputs.safety.permissions, 'tracking': False},
+                      reasons=('low_battery',))
+        inputs = replace(inputs, safety=low)
+        self.controller.update(inputs, 0)
+        update = self.controller.update(inputs, 0)
+        self.assertEqual(update.state, DockingState.ALIGN)
+        self.assertEqual(update.proposed_target.kind, MotionCommandType.GOTO_DOCK_APPROACH)
+        decision = check_command(update.proposed_target, low, 0)
+        self.assertTrue(decision.allowed, decision.reasons)
+        self.assertEqual(decision.command, update.proposed_target)
+
+        # Tracking permission must never bypass a blocked docking approach,
+        # including when rechecking a previously proposed alignment command.
+        blocked = replace(low, permissions={**low.permissions,
+                                           'approach': False, 'tracking': True})
+        decision = check_command(update.proposed_target, blocked, 0)
+        self.assertFalse(decision.allowed)
+        self.assertIn(ACTION_NOT_PERMITTED, decision.reasons)
+        self.assertEqual(decision.command.kind, MotionCommandType.HOVER)
+
+    def test_low_battery_motion_feedback_confirms_landing_before_disarm(self):
         motion = MotionStub()
         motion.arm()
         motion.takeoff(5)
@@ -331,13 +355,17 @@ class DockingControllerTests(unittest.TestCase):
             now = tick * 100_000_000
             feedback = motion.feedback(now)
             inputs = fixture(now, feedback.pose)
-            inputs = replace(inputs, vehicle=feedback)
+            inputs = replace(inputs, vehicle=feedback, safety=replace(
+                inputs.safety, battery_low=True, reasons=('low_battery',),
+                permissions={**inputs.safety.permissions, 'tracking': False}))
             final = self.controller.update(inputs, now)
             if final.landed_on_pad:
                 break
             self.assertFalse(final.failure, final.reason)
             self.assertIsNone(final.proposed_target.validate())
-            self.assertTrue(motion.submit(final.proposed_target, now).accepted)
+            decision = check_command(final.proposed_target, inputs.safety, now)
+            self.assertTrue(decision.allowed, decision.reasons)
+            self.assertTrue(motion.submit(decision.command, now).accepted)
             motion.step(0.1, now)
         self.assertTrue(final.landed_on_pad)
         self.assertTrue(motion.armed)

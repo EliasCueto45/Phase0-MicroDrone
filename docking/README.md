@@ -74,7 +74,7 @@ coordinator's responsibility.
 | idle | None | Mission docking entry → approach |
 | approach | GOTO_DOCK_APPROACH at configured altitude over pad | At position/altitude/yaw tolerance → align if alignment fresh, otherwise search |
 | search | HOVER | Fresh valid alignment → align; search timeout → abort |
-| align | MOVE_TO correcting horizontal position/yaw at approach altitude | Within horizontal/yaw tolerance and descent allowed → descend; lost alignment → search |
+| align | GOTO_DOCK_APPROACH correcting horizontal position/yaw at approach altitude | Within horizontal/yaw tolerance and descent allowed → descend; lost alignment → search |
 | descend | DESCEND_TO_DOCK to pad at z = 0 | Confirmed pad touchdown → complete; lost alignment, drift, or lost descent permission → abort |
 | complete | No flight target; report landed_on_pad | Coordinator enters DOCKED and explicitly disarms |
 | abort | No docking target; report failure | Coordinator enters ABORT; Safety supplies fallback |
