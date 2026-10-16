@@ -2,12 +2,15 @@
 import argparse
 import copy
 import time
+import dataclasses
 
 from state_machine.demos import DEMO_SCENARIO, DEMOS
+from safety_layer.safety_policy import assess
 from state_machine.state_machine import State, step
 from universal_log.Universal_log import UniversalLog
 from motion_engine.contracts import Command, MotionCommandType, Pose, SimulationClock
 from motion_engine.motion_stubs import MotionStub
+from motion_engine.safety_adapter import check_for_motion
 
 
 TICK_HZ = 10
@@ -24,23 +27,26 @@ ONE_SHOT_KINDS = {MotionCommandType.DISARM, MotionCommandType.EMERGENCY_LAND}
 def init_world() -> dict:
     return {
         "bird": {"detected": False, "type": None, "distance_m": None},
-        "battery": {"percent": 100},
-        "safety": {
-                "permissions": {"launch": True, "tracking": True, "approach": True, "descent": True, "hold": True},
-                "emergency": False,
-                "abort": False,
-                "battery_low": False,
-                "battery_critical": False,
-                "battery_recovered": True,
-                "reasons": []
-                },
+        "battery": {"percent": 100, "valid": True},
+        "environment": {
+            "people_nearby": False,
+            "cart_moving": False,
+            "weather": "clear",
+            "camera_ok": True,
+            "comm_ok": True,
+            "valid": True
+        },
+        "dock": {
+            "alignment_valid": True,
+            "valid": True
+        },
         "docking": {"phase": "idle", "landed_on_pad": False, "should_dock": False, "reason": None},
     }
 
 
 # Arm and take off. Called once, when the mission goes IDLE -> HOVERING.
 # Motion rejects a reused command id, so each launch gets its own number.
-def launch_drone(motion, clock, state, reason, launch_number):
+def launch_drone(motion, clock, state, reason, launch_number, assessment):
     now = clock.timestamp_ns
     commands = [
         Command(f"arm-{launch_number}", MotionCommandType.ARM, state.value, now, None, "state_machine", reason),
@@ -49,6 +55,7 @@ def launch_drone(motion, clock, state, reason, launch_number):
     ]
     acks = []
     for command in commands:
+        command, decision = check_for_motion(command, assessment, now)
         ack = motion.submit(command, now)
         if not ack.accepted:
             raise RuntimeError(f"Motion rejected {command.command_id}: {ack.reason}")
@@ -95,7 +102,7 @@ def wanted_command(state, vehicle):
 # Send the wanted command to Motion, or renew it if it is the same one as last tick.
 # active remembers the last command: {"number": int, "kind": ..., "target": ...}.
 # Returns Motion's ack, or None when nothing was sent.
-def send_command(motion, clock, active, state, reason, wanted):
+def send_command(motion, clock, active, state, reason, wanted, assessment):
     if wanted is None:
         # Forget the last command: Motion rejects an id that is reused after it expired
         active["kind"], active["target"] = None, None
@@ -112,6 +119,7 @@ def send_command(motion, clock, active, state, reason, wanted):
     expires = None if kind in ONE_SHOT_KINDS else now + VALIDITY_NS
     command = Command(f"sm-{active['number']}", kind, state.value, now, expires,
                       "state_machine", reason or "renew", target=target)
+    command, decision = check_for_motion(command, assessment, now)
     ack = motion.submit(command, now)
     if ack.accepted:
         active["kind"], active["target"] = kind, target
@@ -145,17 +153,29 @@ def run_world(duration_ms: int, real_time: bool = False, log_transitions: bool =
 
         # 2. Run the state machine each tick using a snapshot of current situation
         snapshot = copy.deepcopy(world)
-        snapshot["timestamp_ns"] = current_time_ms * 1_000_000  # Convert milliseconds to nanoseconds
+        snapshot["timestamp_ns"] = clock.timestamp_ns
+        now_ns = clock.timestamp_ns
+        for section in ["battery", "dock", "environment"]:
+            if section in snapshot:
+                snapshot[section]["timestamp_ns"] = now_ns
+
+        snapshot["vehicle"] = vehicle.to_dict()
+        snapshot["context"] = {
+            "flight_active": vehicle.airborne or vehicle.armed
+        }
+        assessment = assess(snapshot, now_ns)
+        snapshot["safety"] = dataclasses.asdict(assessment)
         newState, reason = step(currState, snapshot)
+
         # When the drone launches (IDLE -> HOVERING), arm and take off once
         if currState == State.IDLE and newState == State.HOVERING:
             launches += 1
-            for ack in launch_drone(motion, clock, newState, reason, launches):
+            for ack in launch_drone(motion, clock, newState, reason, launches, assessment):
                 commands.append((current_time_ms, ack.kind, ack.accepted, ack.reason))
             vehicle = motion.feedback(clock.timestamp_ns)  # so the takeoff shows as the active command
 
         # Send (or renew) the command this state wants, before Motion moves this tick
-        ack = send_command(motion, clock, active, newState, reason, wanted_command(newState, vehicle))
+        ack = send_command(motion, clock, active, newState, reason, wanted_command(newState, vehicle), assessment)
         if ack is not None and ack.command_id != last_command_id:
             commands.append((current_time_ms, ack.kind, ack.accepted, ack.reason))
             last_command_id = ack.command_id
