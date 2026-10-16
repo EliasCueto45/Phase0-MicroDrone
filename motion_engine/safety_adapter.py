@@ -1,0 +1,52 @@
+"""Coordinator glue between Safety's command check and MotionStub.
+
+Since PR #65, Safety (`safety_layer/command_check.py`) reads Motion's own
+contract `Command` and hands back a Motion `Command`: the original if it is
+allowed, otherwise a replacement Motion can execute (HOVER, LAND or
+EMERGENCY_LAND, ID `<original id>-safety`, `source = "safety"`). The kind,
+target and expiry translation this module used to do is no longer needed.
+
+What is left is one call for the coordinator's dispatch step:
+
+    to_submit, decision = check_for_motion(cmd, assessment, now_ns)
+    ack = motion.submit(to_submit, now_ns)
+    # log decision.reasons next to the ack
+
+and a guard that refuses to hand Motion anything that is not a Motion
+`Command` (for example, if Safety's return type changes again). The tests in
+`tests/test_safety_adapter.py` drive the real Safety check and the real
+MotionStub together, so a contract drift between the two teams shows up
+there first.
+"""
+
+from __future__ import annotations
+
+from typing import Tuple
+
+try:
+    from motion_engine.contracts import Command
+except ModuleNotFoundError:  # pragma: no cover -- only motion_engine/ on sys.path
+    from contracts import Command  # type: ignore[no-redef]
+
+from safety_layer.command_check import CommandDecision, check_command
+from safety_layer.safety_policy import SafetyAssessment
+
+
+def check_for_motion(
+    cmd: Command,
+    assessment: SafetyAssessment,
+    now_ns: int,
+) -> Tuple[Command, CommandDecision]:
+    """Run Safety's command check; return `(command_to_submit, decision)`.
+
+    `command_to_submit` is `cmd` itself when Safety allows it, else Safety's
+    replacement. Raises `TypeError` if Safety returns something Motion
+    cannot accept, rather than letting Motion reject it silently mid-flight.
+    """
+    decision = check_command(cmd, assessment, now_ns)
+    if not isinstance(decision.command, Command):
+        raise TypeError(
+            "Safety returned a non-Motion command "
+            f"({type(decision.command).__name__}); update motion_engine/safety_adapter.py"
+        )
+    return decision.command, decision

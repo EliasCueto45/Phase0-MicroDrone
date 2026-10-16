@@ -1,7 +1,8 @@
 """Phase 0 CV interface: synthetic camera input and prescribed observations.
 
 No hardware capture, image-based detection, or mission decisions occur here.
-The simulation calls read() once per tick and owns timing and scheduling.
+The coordinator calls read_due() with simulation time; read() remains available
+for sequential fixture export.
 """
 
 from dataclasses import dataclass
@@ -84,6 +85,21 @@ class CVObservation:
             }
         return result
 
+    def to_bird_snapshot(self) -> dict:
+        """Shared schema-v1 bird section; never relabel source time as now."""
+        if self.simulation_timestamp_ns is None:
+            raise ValueError("Snapshot publication requires an explicit simulation clock mapping")
+        return {
+            "schema_version": 1, "clock": "simulation", "synthetic": True,
+            "timestamp_ns": self.simulation_timestamp_ns,
+            "source_timestamp_ns": self.timestamp_ns, "source_clock": self.clock,
+            "source_id": self.source_id, "camera_id": self.camera_id,
+            "frame_index": self.frame_index, "valid": self.valid,
+            "reason": self.reason, "camera_ok": self.camera_ok,
+            "detected": self.detected, "type": self.bird_type,
+            "distance_m": self.distance_m,
+        }
+
 
 class ComputerVision:
     """Read synthetic frames and log observations through UniversalLog.
@@ -106,6 +122,9 @@ class ComputerVision:
         self._source: SyntheticSource | None = None
         self._frame_index = 0
         self._last_observation: CVObservation | None = None
+        self._last_tick_ns: int | None = None
+        self._read_mode: str | None = None
+        self._exhausted = False
         self.frame: np.ndarray | None = None
         self.gray_frame: np.ndarray | None = None
 
@@ -156,6 +175,9 @@ class ComputerVision:
         )
         self._frame_index = 0
         self._last_observation = None
+        self._last_tick_ns = None
+        self._read_mode = None
+        self._exhausted = False
         self.frame = self.gray_frame = None
         self._log("camera_started", **self._source_details())
 
@@ -165,19 +187,70 @@ class ComputerVision:
         Missing frames return an invalid observation and clear image buffers.
         A finite scenario ends with StopIteration, distinct from camera failure.
         """
+        if self._read_mode == "scheduled":
+            raise RuntimeError("Do not mix read() and read_due() in one camera session")
+        self._read_mode = "sequential"
+        return self._read_one()
+
+    @property
+    def exhausted(self) -> bool:
+        """Finite fixture completion, distinct from a missing camera frame."""
+        return self._exhausted
+
+    def read_due(self, now_ns: int) -> CVObservation | None:
+        """Return the latest due sample, retaining its original sample time.
+
+        Requires a pure, strictly increasing timestamp_mapper (usually a fixed
+        offset). None means no sample is due yet. Cached samples are not
+        refreshed or re-logged: Safety can evaluate their age. StopIteration
+        means the finite scenario ended, never camera failure. Do not mix this
+        API with sequential read() until stop/start.
+        """
+        if type(now_ns) is not int or now_ns < 0:
+            raise ValueError("now_ns must be a nonnegative integer")
+        if self._last_tick_ns is not None and now_ns < self._last_tick_ns:
+            raise ValueError("Simulation time must not move backwards")
+        if self._read_mode == "sequential":
+            raise RuntimeError("Do not mix read() and read_due() in one camera session")
+        if self._exhausted:
+            raise StopIteration
+        if self._source is None:
+            raise RuntimeError("Call start_camera() before read_due()")
+        if self._timestamp_mapper is None:
+            raise ValueError("read_due() requires an explicit timestamp_mapper")
+        self._read_mode = "scheduled"
+        while True:
+            stamp = round(self._frame_index * 1_000_000_000 / self._source.scenario["fps"])
+            mapped = self._map_timestamp(stamp)
+            if (self._last_observation is not None and
+                    mapped <= self._last_observation.simulation_timestamp_ns):
+                raise ValueError("Mapped sample timestamps must strictly increase")
+            if mapped > now_ns:
+                break
+            self._read_one(mapped)
+        self._last_tick_ns = now_ns
+        return self._last_observation
+
+    def _map_timestamp(self, stamp: int) -> int | None:
+        if self._timestamp_mapper is None:
+            return None
+        mapped = self._timestamp_mapper(stamp)
+        if type(mapped) is not int or mapped < 0:
+            raise ValueError("timestamp_mapper must return nonnegative integer nanoseconds")
+        return mapped
+
+    def _read_one(self, mapped_timestamp: int | None = None) -> CVObservation:
         if self._source is None:
             raise RuntimeError("Call start_camera() before read()")
         try:
             frame, data = self._source.sample(self._frame_index)
         except StopIteration:
+            self._exhausted = True
             self._log("source_exhausted", **self._source_details())
             self.stop_camera()
             raise
-        mapped_timestamp = None
-        if self._timestamp_mapper is not None:
-            mapped_timestamp = self._timestamp_mapper(data["timestamp_ns"])
-            if type(mapped_timestamp) is not int or mapped_timestamp < 0:
-                raise ValueError("timestamp_mapper must return nonnegative integer nanoseconds")
+        if mapped_timestamp is None:
+            mapped_timestamp = self._map_timestamp(data["timestamp_ns"])
         self.frame = frame
         self.gray_frame = None if frame is None else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         bird = data["bird"]
