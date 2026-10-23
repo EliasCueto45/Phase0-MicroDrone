@@ -192,8 +192,76 @@ sink. Durations cover acquisition, preprocessing, detection, pose, publication,
 and total processing, excluding final logging overhead. The optional publisher
 receives processing timings; its duration is known only afterward and appears in
 the returned observation and log. Callback/logging exceptions propagate to the
-caller. Run manifests, persistent tracking, and aggregate latency reports remain
-future work.
+caller. The offline benchmark below supplies run manifests and aggregate latency
+reports. Persistent tracking remains future work.
+
+## Synthetic benchmark and replay
+
+In the activated WSL `~/venvs/contextualai-cv` environment, from the repository root:
+
+```bash
+python -m unittest discover -s tests -p 'test_cv_benchmark.py' -v
+# Quick run: 310 frames, ten per condition.
+python -m cv.benchmark --output cv/synthetic_output/benchmark_quick --samples 10 --seed 2026
+# Range assessment requires at least 100 samples per distance: 3,100 frames total.
+python -m cv.benchmark --output cv/synthetic_output/benchmark_full --samples 100 --seed 2026
+# Replay the exact saved PNGs; use a NEW output directory each time.
+python -m cv.benchmark --dataset cv/synthetic_output/benchmark_full/dataset --output cv/synthetic_output/benchmark_replay
+code cv/synthetic_output/benchmark_full/report.md
+```
+
+Existing output directories are refused to prevent overwriting evidence. Outputs:
+
+| File | Contents |
+| --- | --- |
+| `dataset/manifest.json`, `dataset/images/*.png` | Seeds, per-frame settings, calibration, image hashes, and separate ground truth |
+| `run.json`, `opencv_build.txt` | Effective detector/evaluator settings, warmup, software/build/machine information, Git revision and source hashes |
+| `observations.jsonl` | Actual perception records; no evaluation truth |
+| `evaluation.jsonl` | Per-frame TP/FP/FN, pose errors, and timings |
+| `report.json`, `report.md` | Machine-readable metrics and a readable per-condition table |
+
+There are 31 conditions: baseline, physical distance (0.5-6 m), in-plane rotation,
+out-of-plane tilt, brightness, horizontal motion blur, partial occlusion, physical
+marker size (scale), background clutter, two negative scenes, and a combined
+stress case. Each present frame currently contains one marker with a seeded ID
+and subpixel position variation. Multiple-marker detection has separate tests;
+multi-object benchmark scenes remain an extension. Default seed 2026 is the
+baseline; use a separately recorded seed for tuning and hold it fixed for comparisons.
+
+Clutter stays behind the marker, including its white cells. Occlusion covers a
+marker-coordinate strip and records actual raster area coverage. Every present
+marker counts in the denominator, even under heavy occlusion. Brightness is a
+pixel-intensity multiplier, not calibrated lux. Scale changes known physical
+marker size at fixed distance; distance uses fixed size and calibration. Distortion
+is zero; these scenes do not establish physical-camera performance.
+
+Matching requires the same marker ID and ordered-corner RMS error at most 8 px
+(`--tolerance-px`). Matching is one-to-one; duplicate/wrong-ID detections count as
+FP and unmatched truth counts as FN. Undefined ratios are null. Reports include
+detection rate and its 95% Wilson interval, precision, false positives per negative
+frame, and pose coverage over both all truth and matched detections. Pose errors
+cover X/Y/Z bias, MAE, RMSE, p95 absolute error; wrapped ZYX yaw/pitch/roll errors;
+and rotation angular error. Euler metrics exclude near-singular poses and report
+their count. Detection/pose failures remain visible rather than becoming zero error.
+
+Range is the farthest contiguous passing tested distance, starting at the nearest,
+with at least 100 objects per distance and a detection-rate point estimate >=95%.
+Per-condition uncertainty intervals are reported separately. This applies only
+to the clean synthetic distance sweep, not to combined degradations or docking
+pose tolerances. A ten-sample quick run leaves qualified range null.
+
+Three warmup frames per condition are excluded from metrics (`--warmup` changes
+this); all evaluation frames are retained. Stage p50/p95/p99 latencies are in ms.
+Acquisition includes file read, hash verification, and PNG decoding. Publication
+is a no-op local callback; logging measures JSON serialization/buffered writes,
+not durable fsync. `read_including_logging` includes the sink; `total_processing`
+does not. Evaluation and image generation are outside pipeline timings. No
+tracking-stage timing is claimed. Timing is machine/load-dependent and not
+expected to reproduce exactly; accuracy replay is tested with the same software.
+
+This benchmark changes no DetectionResult fields, tracking semantics, mission
+states, Motion APIs, or coordinator behavior. Shared message/ENU integration and
+retained-versus-predicted tracking semantics remain on hold pending agreement.
 
 ### Shared DetectionResult integration status
 
@@ -345,8 +413,10 @@ and stage p50/p95/p99 latency with machine, resolution, and sample counts.
 1. **Implemented:** frame/detection contracts and synthetic/recorded providers.
 2. **Implemented:** pixel-based ArUco detection, clean-scene calibrated pose,
    per-frame logs/timing hooks, and fixture compatibility tests.
-3. **Remaining:** degradation sweeps and reproducible detection/pose benchmarks.
-4. **Remaining:** persistent tracking, run manifests, and aggregate latency reports.
+3. **Implemented:** seeded single-marker degradation sweeps, saved-image replay,
+   detection/pose benchmarks, run manifests, and aggregate latency reports.
+4. **Remaining:** persistent tracking, multi-object benchmark scenes, and shared
+   detection-versus-track message agreement.
 5. **Remaining:** coordinator scheduling and world-frame adapters, retaining fixture tests.
 
 Acceptance requires the same detector to process synthetic images and recorded
