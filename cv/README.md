@@ -1,4 +1,4 @@
-# CV — synthetic loop integration
+# Computer vision
 
 [Shared integration contract](../INTEGRATION_README.md)
 
@@ -100,3 +100,136 @@ python -m cv.synthetic_frames --scenario cv/scenarios/integration_cycle.json --h
 OpenCV and NumPy generate optional fixture images and grayscale buffers; the
 observations are still prescribed booleans. Front and downward camera IDs are
 supported, but neither produces docking alignment or physical pose estimates.
+
+
+## Phase 0 perception roadmap
+
+Planned work, not current runtime behavior. CV answers **what the camera sees**:
+acquisition, detection, camera-relative pose, object tracking, and observations.
+Action selection remains with Navigation, Docking, Safety, and the coordinator.
+Preserve the existing fixture API while developing the image-based pipeline.
+
+```mermaid
+flowchart LR
+    A[Camera provider] --> B[Preprocessing]
+    B --> C[Detection]
+    C --> D[Pose estimation]
+    D --> E[Tracking]
+    E --> F[DetectionResult publisher]
+```
+
+### Providers and detection contract
+
+Use a common provider interface (`read() -> FrameSample`, `close()`) for synthetic
+images and recorded video, with physical cameras supported later. Samples carry
+pixels, frame number, source/camera identity, capture timestamp and clock,
+validity/reason, and calibration identity. Keep missing input, processing failure,
+valid empty frames, and finite-source EOF distinct. Preserve source timestamps;
+the coordinator owns clock mapping and scheduling.
+
+Prefer the existing `CVObservation` interface and serialized field names wherever
+they convey the required information. Extend it additively for perception; do not
+replace it or introduce aliases solely to match the suggested terminology.
+
+| Suggested information | Current interface | Decision |
+| --- | --- | --- |
+| Timestamp | `timestamp_ns`, `clock`, optional mapped simulation time | Keep; already explicit about units and clock |
+| Source camera | `camera_id` | Keep; no `source_camera` alias needed |
+| Confidence | Nullable `confidence` in the observation and `to_dict()` | Keep; currently unset by the fixture reader and omitted from `to_bird_snapshot()` |
+| Object type | `bird_type`, serialized as `bird.type`; snapshot uses `type` | Keep for bird observations; use `type` for future generic detection entries |
+| Object ID | None; `source_id` identifies the input source | Add per-object identity; do not repurpose `source_id` |
+| X/Y/Z position | Only fixture `distance_m` | Add camera-relative position; scalar distance cannot encode 3D location |
+| Orientation | None | Add nullable orientation |
+| Tracking ID | None; `frame_index` identifies a frame | Add persistent track identity |
+
+The current interface therefore covers part of the suggested contract, not all
+of it. Preserve its availability/status, provenance, scheduling, and legacy bird
+snapshot semantics. The standalone image exporter already has a `detections`
+list (`label`, `bbox_xywh`, `confidence`), but it contains prescribed metadata,
+not measured pose or persistent identity, and is not the runtime observation API.
+
+Plan an optional generic `detections` collection alongside the existing bird
+fields, with processing status and stage timings at frame level. Keep timestamps
+and `camera_id` in the shared frame envelope rather than duplicating them per
+object. Existing fixture-only callers must continue to work; distinguish an
+unpopulated generic result from a successfully processed empty list. Version any
+serialized extension explicitly and test legacy adapters. Generic detections do
+not populate the legacy bird fields automatically.
+
+Proposed per-object additions reuse existing terminology where applicable:
+
+| Field | Meaning |
+| --- | --- |
+| `object_id`, `type` | Initially dictionary/marker ID and `aruco_marker`; `type` follows the existing serialized convention |
+| `confidence`, `confidence_method` | Nullable score and its meaning; do not invent a probability |
+| `position_x`, `position_y`, `position_z` | Marker-center translation in camera-relative metres; null without valid pose |
+| `orientation` | Quaternion `{x,y,z,w}` rotating marker-frame vectors into camera-frame vectors |
+| `tracking_id` | Camera/session-local track instance, distinct from marker identity |
+| `corners_px` | Ordered image corners |
+| `pose_valid`, `pose_reason`, `reprojection_error_px` | Pose validity and quality, independent of detection success |
+
+Use camera axes x right, y down, z forward; marker axes x right, y up, z out of
+the printed face. Record the solver's corner order. Metric pose requires camera
+intrinsics, distortion, resolution, and physical marker size. Resizing/cropping
+must preserve calibration consistency. A detection without calibration retains
+its corners and identity with null pose. Missing quantities are null, not zero.
+
+Camera coordinates require an explicit calibrated transform before use in the
+integration loop's ENU frame. An ArUco detection must never become a bird
+observation. Replacing synthetic docking alignment requires a validated adapter.
+
+### Synthetic datasets and evaluation
+
+Generate seeded scenes with calibrated marker geometry and separate ground-truth
+manifests. The detector and tracker receive pixels, never truth metadata. Include
+clean scenes, marker-free negatives, clutter, partial occlusion, variable lighting,
+motion blur, rotation, scaling, and multiple markers. Save calibration, marker
+sizes, poses, seeds, and degradation parameters for replay. Keep evaluation seeds
+separate from tuning scenes.
+
+Benchmark distance, rotation, lighting, projected scale, and occlusion. Physical
+range requires known marker size and calibration; pixel resizing alone cannot
+establish metres. Match predictions to truth one-to-one with declared identity
+and image-position tolerances, counting duplicates as false positives. Report:
+
+- Detection rate `TP/(TP+FN)`, precision, FP/FN counts, and false positives per
+  negative frame, with sample counts and uncertainty intervals.
+- X/Y/Z bias, MAE, RMSE, and p95 error; yaw/pitch/roll errors with a declared Euler
+  convention and wrapped angles, plus quaternion angular error.
+- Pose-valid coverage and failures separately from errors on successful poses.
+- Maximum reliable tested range under a declared condition envelope and agreed
+  detection/pose thresholds. Synthetic results do not establish hardware range.
+
+### Tracking and instrumentation
+
+Associate marker identities within each camera/session. Preserve track IDs over
+a configured short gap, expire them using source time, and reset on source restart.
+Flag duplicate marker IDs as ambiguous. Retained tracks must not appear as fresh
+observations. Cross-camera association and prediction can wait.
+
+Log every processed frame, including empty/failed frames, with timestamps, frame
+number, detections, confidence, pose, track IDs, and processing times. Record run
+configuration, software versions, calibration, dataset seed/manifest, and dropped
+frames. Retain input media or a reproducible manifest for later investigation.
+
+Measure acquisition, preprocessing, detection, pose estimation, tracking, and
+publication with a monotonic performance clock. Publication timing covers the
+local callback/queue operation; measure logging overhead separately. Report total
+and stage p50/p95/p99 latency with machine, resolution, and sample counts.
+
+### Implementation order and completion
+
+1. Define frame/detection contracts and synthetic/recorded providers.
+2. Detect ArUco markers from pixels and estimate calibrated pose in clean scenes.
+   Include logging/timing hooks from the start.
+3. Add degradation sweeps and reproducible detection/pose benchmark reports.
+4. Add persistent tracking and complete latency reporting.
+5. Integrate through explicit frame/time adapters while retaining fixture tests.
+
+Acceptance requires the same detector to process synthetic images and recorded
+video, reproducible benchmark reports, and logs explaining failures without drone
+hardware. Test pixel behavior, pose accuracy, lifecycle errors, tracking expiry,
+and evaluation accounting. Changing truth metadata alone must not change output.
+
+Defer bird species classification, ML models, threat classification, behavior
+prediction, deterrence selection, and autonomous mission planning.
