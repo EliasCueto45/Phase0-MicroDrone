@@ -51,7 +51,7 @@ Any other state is treated as an unexpected/error condition.
 Import the class and create log entries from your application:
 
 ```python
-from Universal_log import UniversalLog
+from universal_log.Universal_log import UniversalLog
 
 UniversalLog(
     {
@@ -67,15 +67,11 @@ UniversalLog(
 )
 ```
 
-To run the bundled sample entries from the project root:
+The bundled sample entries are in `test_states.json`. The `main()` sample
+runner at the bottom of `Universal_log.py` is commented out, so running that
+file does not execute the sample.
 
-```powershell
-python .\universal_log\Universal_log.py
-```
-
-The sample includes every supported state, an unknown state, nested and empty details, and an entry that relies on default timestamp and details values.
-
-This will:
+When an application creates a `UniversalLog` entry, the logger will:
 
 - validate the input as a JSON object
 - ensure `Details` is a dictionary
@@ -93,4 +89,5 @@ This makes it easy to catch malformed log input early.
 
 ## Notes
 
-This project is designed as a reusable logging helper rather than a standalone CLI program. It can be imported into a larger application or script where state transitions need to be recorded in a consistent, machine-readable format.
+This project is designed as a reusable logging helper. Applications can import
+`UniversalLog` and write entries through the same interface.
