@@ -1,0 +1,11 @@
+{
+  "scenario_id": "integration_cycle", "fps": 15, "loop": false, "appearance": "bird",
+  "segments": [
+    {"frames": 15, "camera_ok": true, "bird": {"detected": false, "type": null, "distance_m": null}},
+    {"frames": 60, "camera_ok": true, "bird": {"detected": true, "type": "fixture_bird", "distance_m": 30}},
+    {"frames": 15, "camera_ok": true, "bird": {"detected": false, "type": null, "distance_m": null}},
+    {"frames": 30, "camera_ok": true, "bird": {"detected": true, "type": "fixture_bird", "distance_m": 30}},
+    {"frames": 60, "camera_ok": true, "bird": {"detected": false, "type": null, "distance_m": null}},
+    {"frames": 15, "camera_ok": false, "bird": null}
+  ]
+}
