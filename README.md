@@ -1,203 +1,99 @@
+# Phase-0 Autonomous MicroDrone Wildlife Deterrence System
 
+### CONTEXTUAL·AI SYSTEMS — RCOS Fall 2026
 
-# **Phase‑0 Autonomous MicroDrone Wildlife Deterrence System**  
-### CONTEXTUAL·AI™ SYSTEMS — RCOS Fall 2026
+![CONTEXTUAL·AI SYSTEMS Logo](assets/assets/banner/ContextualAI%20logo.png)
 
-![CONTEXTUAL·AI SYSTEMS Logo](https://raw.githubusercontent.com/contextualai-systems/Phase0-MicroDrone/refs/heads/main/assets/banner/ContextualAI%20logo.png)
-
-![Phase‑0 QR Code](https://raw.githubusercontent.com/contextualai-systems/Phase0-MicroDrone/refs/heads/main/assets/qr/QR%20Code%20ContextualAI%20Systems.png)
-
----
-
-## 📄 RCOS Recruitment Deck (Fall 2026)
-View the full pitch deck used during the RCOS kickoff session:
-
-[RPI Recruitment Follow-Up Presentation (PDF)](assets/presentations/RPI_Recruitment_Follow_Up_Presentation.pdf)
+![Phase-0 QR Code](assets/qr/QR%20Code%20ContextualAI%20Systems.png)
 
 ---
 
+## Recruitment materials
 
-An open-source software and simulation foundation for a future roof-mounted microdrone. Phase 0 focuses on synthetic camera frames, preprocessing, observation stubs, logging, and basic simulated movement and docking interfaces.
+- [RPI Recruitment Follow-Up Presentation (PDF)](assets/presentations/RPI_Recruitment_Follow_Up_Presentation.pdf)
+- [Student Engineering Packet V3 (PDF)](docs/STUDENT%20ENGINEERING%20PACKET%20V3.pdf)
+- [Student Engineering Packet V3 (DOCX)](docs/STUDENT%20ENGINEERING%20PACKET%20V3.docx)
 
-[START_HERE.md](START_HERE.md) defines the authoritative semester scope. The engineering packet and recruitment materials below provide historical project context, not additional Phase 0 requirements.
+The engineering packet and recruitment materials provide broader project
+context. [START_HERE.md](START_HERE.md) is authoritative for the current
+semester scope.
 
----
+## Project scope
 
-## 🚀 New to the Project? Start Here  
+Phase 0 is a software and synthetic-simulation project. It does not require
+physical flight or hardware integration. Current code includes individual
+synthetic CV, motion, safety, docking, and mission-state components; it is not
+yet a fully integrated runtime. The proposed PX4/Gazebo environment also has
+not been validated as a repository setup.
 
-👉 [START_HERE.md](START_HERE.md)
+See [START_HERE.md](START_HERE.md) for scope and [INTEGRATION_README.md](INTEGRATION_README.md)
+for the target shared-loop contract.
 
+## Repository structure
 
-This document explains:
-
-- What Phase‑0 is  
-- What you will learn  
-- How to get started  
-- How to pick your first issue  
-- Future semesters & entrepreneurial pathways  
-
-If you’re evaluating this project for RCOS, START_HERE.md is your first stop.
-
----
-
-## 📄 Student Engineering Packet (2026)  
-Complete 51‑page engineering documentation:
-
-- **PDF Version**  
-  [https://github.com/contextualai-systems/Phase0-MicroDrone/blob/main/docs/STUDENT%20ENGINEERING%20PACKET%20V3.pdf](https://github.com/contextualai-systems/Phase0-MicroDrone/blob/main/docs/STUDENT%20ENGINEERING%20PACKET%20V3.pdf)
-
-- **DOCX Version**  
-  [https://github.com/contextualai-systems/Phase0-MicroDrone/blob/main/docs/STUDENT%20ENGINEERING%20PACKET%20V3.docx](https://github.com/contextualai-systems/Phase0-MicroDrone/blob/main/docs/STUDENT%20ENGINEERING%20PACKET%20V3.docx)
-
----
-
-## 🧠 System Overview  
-The Phase‑0 MicroDrone is built around **five core engineering modules**:
-
-1. **Computer Vision Pipeline**  
-2. **Motion Engine**  
-3. **Navigation**  
-4. **Safety Layer**  
-5. **Docking System**
-
-Phase‑0 focuses on architecture, stubs, logging, and test harnesses — not hardware flight.
-
-## 🌟 Why Join This Project?
-- Beginner‑friendly tasks  
-- Real engineering architecture  
-- Clear module structure  
-- Future semesters planned  
-- Entrepreneurial pathway  
-- Opportunity to lead modules  
-
-Phase 0 Architecture Clarification (Final)
-This section supersedes both the initial Phase 0 proposal and the updated README changes committed on 9/11 and 9/16. It defines the authoritative architecture for the semester.
-Camera Configuration
-The drone uses front and downward cameras.
-Front camera → forward sensing and general CV pipeline Downward camera → alignment and descent role
-The earlier front and rear concept is retired. The rear camera does not serve a role in Phase 0 or Phase 1. The downward camera is required for Phase 1 marker detection and pose estimation. Phase 0 uses synthetic alignment inputs, so the downward camera’s role is defined even if detection is not implemented.
-Docking
-Phase 0 docking uses synthetic alignment inputs. Real marker detection is optional stretch work. Pose estimation begins in Phase 1.
-Docking station design will move toward a larger pad with magnetic capture instead of precise pin alignment. The drone only needs to land within a defined tolerance. The dock handles final mechanical alignment.
-Cart Sensor
-The cart sensor must detect occupancy and size class.
-Required size classes SMALL = bird scale LARGE = human scale
-Deterrence is only triggered for bird scale objects. Large objects, including humans, do not trigger deterrence. The drone does not use IR or depth sensors in Phase 0.
-Mission Rule
-If the cart is in motion, the drone must return to the docking station or enter a defined safe state. Docking on a moving platform is not part of Phase 0 or Phase 1. This is a hard rule.
-CV Pipeline
-Phase 0 CV uses synthetic frames, preprocessing and timestamped stub observations. No pose estimation. No real marker detection required. The downward camera role is defined but detection can be synthetic.
-Drone Rotation
-The drone will perform a controlled yaw rotation during sensing. Clockwise or counterclockwise is fine. This improves coverage for both cameras and future sensors.
-Environment Setup
-Standardized setup for the entire team:
-Ubuntu 24.04 Noble PX4 1.17 Gazebo Harmonic ROS 2 Jazzy (hold off installing until I pin exact versions)
-PX4 runs the autopilot. Gazebo provides the simulated world. ROS 2 is the bridge between everything. I will post the exact ROS version and installation steps once I finalize the environment.
-Module Responsibilities
-The architecture is fixed. Module boundaries are fixed. Interfaces are fixed. Environment versions are fixed.
-Students have autonomy inside their module, but not in architecture, sensor selection, mission rules, docking logic or environment setup.
-Next Steps for the Team
-Push your module structure. Update your README to match this architecture. List any blockers. Confirm your module responsibilities. Post any questions.
-I will review updates tomorrow afternoon.
-
----
-
-## 🏗️ Repository Structure  
-```
+```text
 Phase0-MicroDrone/
-│
-├── assets/                 # QR codes, handouts, presentations
-│   ├── qr/                 # QR code images
-│   └── presentations/      # RCOS decks + recruitment materials
-│
-├── docs/                   # Student Engineering Packet (PDF + DOCX)
-│
-├── cv/                     # Computer vision pipeline
-├── motion_engine/          # Multi-axis motion engine
-├── safety_layer/           # Safety overrides + constraints
-├── docking/                # Docking logic + alignment sensor
-│
-├── electronics/            # Wiring diagrams + GPIO maps
-├── hardware/               # Frame, motors, ESCs, dock components
-│
-├── simulation/             # Simulation configs (future phases)
-├── tests/                  # Unit + integration tests
-│
-├── src/                    # Main Jetson Nano runtime code
-│
-├── README.md               # (You are here)
-└── LICENSE.md              # MIT License
+├── assets/                 # Recruitment materials and project images
+├── cv/                     # Synthetic camera input and observations
+├── docking/                # Docking state and controller
+├── docs/                   # Engineering packet and archived READMEs
+├── motion_engine/          # Motion contract, stub, and synthetic data
+├── navigation/             # Navigation workstream documentation
+├── safety_layer/           # Safety policy and command checks
+├── simulation/             # Simulation workstream documentation
+├── state_machine/          # Mission transitions and scripted demo
+├── tests/                  # Component tests
+├── universal_log/          # Structured log helper
+├── INTEGRATION_README.md   # Target integrated-loop contract
+└── START_HERE.md           # Authoritative Phase 0 scope
 ```
 
----
+The architecture image is [Drone Centric Architecture](assets/assets/architecture/Drone%20Centric%20Architecture.png).
 
-## 🖼️ Architecture Summary Diagram  
-*(Located in assets/architecture)*
+## Getting started
 
-Shows the full autonomy loop:
+There is no repository-wide dependency manifest or integrated application
+entry point yet. Clone the repository and run the component demo:
 
-- Launch from roof dock  
-- Autonomous flight and sensing  
-- Return‑to‑dock  
-- Recharge  
-- Ready for next mission  
-
-No cloud compute — fully autonomous.
-
----
-
-## ⚡ Getting Started (Quick Start)
-
-### Clone the repository
-```
-git clone https://github.com/contextualai-systems/Phase0-MicroDrone
+```sh
+git clone https://github.com/UtopianComet/Phase0-MicroDrone.git
+cd Phase0-MicroDrone
+python -m state_machine.run_loop
 ```
 
-### Install Python dependencies
-```
-pip install -r requirements.txt
-```
+The state-machine tests use `pytest` (install it if needed):
 
-### Run the system
-```
-python3 src/main.py
+```sh
+python -m pip install pytest
+python -m pytest state_machine -v
 ```
 
----
+Follow the relevant [module guides](START_HERE.md#module-guides) for available
+component-specific requirements and tests. Some workstreams do not yet have
+runnable code. The scripted state-machine demo does not connect CV, Motion,
+Safety, Docking, PX4, ROS 2, or Gazebo into a single runtime.
 
-## 👥 RCOS Student Teams (Fall 2026)
+## Contributing
 
-- Computer Vision  
-- Motion Engine  
-- Navigation  
-- Safety Layer  
-- Docking System  
-- Electronics + Hardware  
-- Simulation (future phases)
+Fork the repository, create a feature branch, and submit a pull request. Follow
+the contribution guidance in [CONTRIBUTING.md](CONTRIBUTING.md). Run relevant
+synthetic tests for changes to safety or movement behavior; simulation results
+are not evidence of physical-flight safety.
 
----
+## RCOS workstreams
 
-## 🛠️ Contributing
+- Computer Vision
+- Motion Engine
+- Navigation
+- Safety Layer
+- Docking
+- Simulation and integration
 
-- Fork the repo  
-- Create a feature branch  
-- Submit a pull request  
-- Follow coding standards in `/docs`  
-- Test safety overrides before flight  
+## Contact
 
-Beginner‑friendly tasks are labeled:
+**Jeffrey N. Barat**
+Founder — CONTEXTUAL·AI SYSTEMS
 
-- **good first issue**  
-- **starter task**  
-- **phase:0**
+RPI RCOS Project Lead
 
-
----
-
-## 📬 Contact  
-**Jeffrey N. Barat**  
-Founder — CONTEXTUAL·AI™ SYSTEMS  
-RPI RCOS Project Lead  
 Palm Beach Gardens, FL
-
----
