@@ -13,8 +13,10 @@ class MissionStatus:
     state: State  # mission state after step()
     reason: str | None  # why the state changed, or None if it did not change
     state_entered_ns: int  # simulation time when the current state was entered
-    launch_phase: str  # "none", "arming", "climbing" or "complete"
-    flight_active: bool  # last known: whether the drone is armed or airborne
+    # "none", "climbing" or "complete". The demos reach "complete" once step() waits for the climb
+    # before TRACKING (contract section 7, not implemented yet).
+    launch_phase: str
+    flight_active: bool  # whether the drone is armed or airborne after this tick's move
     bird_absent_since_ns: int | None  # first tick the bird was missing, or None while it is seen
     hover_started_ns: int | None  # when ordinary hovering began (not the launch climb), or None outside it
     return_started_ns: int | None  # when the first return began, or None if no return has started
